@@ -1,11 +1,11 @@
 #pragma once 
+
 struct Session;
 class Packet;
 class SmartPacket;
 class IHandler
 {
 public:
-	virtual BOOL Start() = 0;
 	virtual void SendPacket(ULONGLONG id, SmartPacket& sendPacket) = 0;
 	virtual BOOL OnConnectionRequest() = 0;
 	virtual void* OnAccept(ULONGLONG id) = 0;

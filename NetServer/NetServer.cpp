@@ -15,12 +15,12 @@
 #pragma comment(lib, "ws2_32.lib")
 #pragma comment(lib,"TextParser.lib")
 
-BOOL NetServer::Start()
+NetServer::NetServer()
 {
 	std::locale::global(std::locale(""));
 	char* pStart;
 	char* pEnd;
-	PARSER psr = CreateParser(L"ChatServerConfig.txt");
+	PARSER psr = CreateParser(L"ServerConfig.txt");
 
 	WCHAR ipStr[16];
 	GetValue(psr, L"BIND_IP", (PVOID*)&pStart, (PVOID*)&pEnd);
@@ -55,6 +55,7 @@ BOOL NetServer::Start()
 	GetValue(psr, L"TIME_OUT_MILLISECONDS", (PVOID*)&pStart, nullptr);
 	TIME_OUT_MILLISECONDS_ = _wtoi((LPCWSTR)pStart);
 	ReleaseParser(psr);
+
 #ifdef DEBUG_LEAK
 	InitializeCriticalSection(&Packet::cs_for_debug_leak);
 #endif
@@ -78,7 +79,6 @@ BOOL NetServer::Start()
 
 	SYSTEM_INFO si;
 	GetSystemInfo(&si);
-
 
 	hListenSock_ = socket(AF_INET, SOCK_STREAM, 0);
 	if (hListenSock_ == INVALID_SOCKET)
@@ -155,7 +155,6 @@ BOOL NetServer::Start()
 		__debugbreak();
 	}
 	LOG(L"ONOFF", SYSTEM, TEXTFILE, L"MAKE AccpetThread OK!");
-	return TRUE;
 }
 
 void NetServer::SendPacket(ULONGLONG id, SmartPacket& sendPacket)
