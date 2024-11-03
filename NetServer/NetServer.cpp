@@ -187,10 +187,39 @@ void NetServer::SendPacket(ULONGLONG id, SmartPacket& sendPacket)
 		ReleaseSession(pSession);
 }
 
+void NetServer::SendPacket(ULONGLONG id, Packet* pPacket)
+{
+	Session* pSession = pSessionArr_ + Session::GET_SESSION_INDEX(id);
+	long IoCnt = InterlockedIncrement(&pSession->IoCnt_);
+
+	// 이미 RELEASE 진행중이거나 RELEASE된 경우
+	if ((IoCnt & Session::RELEASE_FLAG) == Session::RELEASE_FLAG)
+	{
+		if (InterlockedDecrement(&pSession->IoCnt_) == 0)
+			ReleaseSession(pSession);
+		return;
+	}
+
+	// RELEASE 완료후 다시 세션에 대한 초기화가 완료된경우 즉 재활용
+	if (id != pSession->id_)
+	{
+		if (InterlockedDecrement(&pSession->IoCnt_) == 0)
+			ReleaseSession(pSession);
+		return;
+	}
+
+	// 인코딩
+	pPacket->SetHeader<Net>();
+	pPacket->IncreaseRefCnt();
+	pSession->sendPacketQ_.Enqueue(pPacket);
+	SendPost(pSession);
+	if (InterlockedDecrement(&pSession->IoCnt_) == 0)
+		ReleaseSession(pSession);
+}
+
 void NetServer::Disconnect(ULONGLONG id)
 {
 	Session* pSession = pSessionArr_ + Session::GET_SESSION_INDEX(id);
-
 	long IoCnt = InterlockedIncrement(&pSession->IoCnt_);
 
 	// RELEASE진행중 혹은 진행완료
@@ -289,6 +318,7 @@ unsigned __stdcall NetServer::IOCPWorkerThread(LPVOID arg)
 		WSAOVERLAPPED* pOverlapped = nullptr;
 		DWORD dwNOBT = 0;
 		Session* pSession = nullptr;
+		bool bPost = false;
 		BOOL bGQCSRet = GetQueuedCompletionStatus(pNetServer->hcp_, &dwNOBT, (PULONG_PTR)&pSession, (LPOVERLAPPED*)&pOverlapped, INFINITE);
 		do
 		{
@@ -305,12 +335,27 @@ unsigned __stdcall NetServer::IOCPWorkerThread(LPVOID arg)
 			if (!bGQCSRet && pOverlapped)
 				break;
 
+			// PQCS로 할일 쐇을떄 대응용
+			if (dwNOBT == 1 && (ULONG_PTR)pSession == 1)
+			{
+#pragma warning(disable : 4311)
+#pragma warning(disable : 4302)
+				pNetServer->OnPost((int)pOverlapped);
+				bPost = true;
+				break;
+#pragma warning(default: 4311)
+#pragma warning(default: 4302)
+			}
+
 			if (&pSession->recvOverlapped == pOverlapped)
 				pNetServer->RecvProc(pSession, dwNOBT);
 			else
 				pNetServer->SendProc(pSession, dwNOBT);
 
 		} while (0);
+
+		if (bPost == true)
+			continue;
 
 		if (InterlockedDecrement(&pSession->IoCnt_) == 0)
 			pNetServer->ReleaseSession(pSession);

@@ -3,6 +3,7 @@
 #include <new>
 #include "CAddressTranslator.h"
 
+#define QUEUE
 
 template<typename T,BOOL bPlacementNew>
 struct Bucket

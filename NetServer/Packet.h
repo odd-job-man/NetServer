@@ -302,7 +302,7 @@ public:
 	char* pBuffer_;
 	int front_;
 	int rear_;
-	int refCnt_ = 0;
+	LONG refCnt_ = 0;
 	bool bEncoded_;
 public:
 	unsigned short playerIdx_;
@@ -437,6 +437,11 @@ public:
 	static void Free(Packet* pPacket)
 	{
 		packetPool_.Free(pPacket);
+	}
+
+	bool IsBufferEmpty()
+	{
+		return front_ == rear_;
 	}
 
 #ifdef DEBUG_LEAK

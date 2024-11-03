@@ -9,12 +9,14 @@ class NetServer : public IHandler
 {
 public:
 	NetServer();
-	virtual void SendPacket(ULONGLONG id, SmartPacket& sendPacket);
+	void SendPacket(ULONGLONG id, SmartPacket& sendPacket);
+	void SendPacket(ULONGLONG id, Packet* pPacket);
 	virtual BOOL OnConnectionRequest() = 0;
 	virtual void* OnAccept(ULONGLONG id) = 0;
 	virtual void OnRelease(ULONGLONG id) = 0;
 	virtual void OnRecv(ULONGLONG id, Packet* pPacket) = 0;
 	virtual void OnError(ULONGLONG id, int errorType, Packet* pRcvdPacket) = 0;
+	virtual void OnPost(int order) = 0;
 	// µð¹ö±ë¿ë
 	void Disconnect(ULONGLONG id);
 	static unsigned __stdcall AcceptThread(LPVOID arg);

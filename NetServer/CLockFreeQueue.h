@@ -40,7 +40,6 @@ private:
 
 public:
 	static inline CTlsObjectPool<Node, true> nodePool_;
-	//CLockFreeObjectPool<Node, true> nodePool_;
 	static inline uint64_t identifier = 0;
 
 	const uint64_t identifier_;
