@@ -129,6 +129,8 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="CpuUsage.cpp" />
+    <ClCompile Include="HMonitor.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="NetServer.cpp" />
     <ClCompile Include="RingBuffer.cpp" />
@@ -136,11 +138,13 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="CAddressTranslator.h" />
+    <ClInclude Include="CpuUsage.h" />
     <ClInclude Include="CLockFreeObjectPool.h" />
     <ClInclude Include="CLockFreeQueue.h" />
     <ClInclude Include="CLockFreeStack.h" />
     <ClInclude Include="CTlsObjectPool.h" />
     <ClInclude Include="ErrType.h" />
+    <ClInclude Include="HMonitor.h" />
     <ClInclude Include="IHandler.h" />
     <ClInclude Include="Logger.h" />
     <ClInclude Include="NetServer.h" />

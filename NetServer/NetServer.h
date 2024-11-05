@@ -11,6 +11,7 @@ public:
 	NetServer();
 	void SendPacket(ULONGLONG id, SmartPacket& sendPacket);
 	void SendPacket(ULONGLONG id, Packet* pPacket);
+	void SendPacket_ALREADY_ENCODED(ULONGLONG id, Packet* pPacket);
 	virtual BOOL OnConnectionRequest() = 0;
 	virtual void* OnAccept(ULONGLONG id) = 0;
 	virtual void OnRelease(ULONGLONG id) = 0;

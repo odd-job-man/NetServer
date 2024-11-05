@@ -131,7 +131,7 @@ NetServer::NetServer()
 	hIOCPWorkerThreadArr_ = new HANDLE[IOCP_WORKER_THREAD_NUM_];
 	for (DWORD i = 0; i < IOCP_WORKER_THREAD_NUM_; ++i)
 	{
-		hIOCPWorkerThreadArr_[i] = (HANDLE)_beginthreadex(NULL, 0, IOCPWorkerThread, this, 0, nullptr);
+		hIOCPWorkerThreadArr_[i] = (HANDLE)_beginthreadex(NULL, 0, IOCPWorkerThread, this, CREATE_SUSPENDED, nullptr);
 		if (!hIOCPWorkerThreadArr_[i])
 		{
 			LOG(L"ONOFF", SYSTEM, TEXTFILE, L"MAKE WorkerThread Fail ErrCode : %u", WSAGetLastError());
@@ -148,7 +148,7 @@ NetServer::NetServer()
 	for (int i = maxSession_ - 1; i >= 0; --i)
 		DisconnectStack_.Push(i);
 
-	hAcceptThread_ = (HANDLE)_beginthreadex(NULL, 0, AcceptThread, this, 0, nullptr);
+	hAcceptThread_ = (HANDLE)_beginthreadex(NULL, 0, AcceptThread, this, CREATE_SUSPENDED, nullptr);
 	if (!hAcceptThread_)
 	{
 		LOG(L"ONOFF", SYSTEM, TEXTFILE, L"MAKE AccpetThread Fail ErrCode : %u", WSAGetLastError());
@@ -156,6 +156,7 @@ NetServer::NetServer()
 	}
 	LOG(L"ONOFF", SYSTEM, TEXTFILE, L"MAKE AccpetThread OK!");
 }
+
 
 void NetServer::SendPacket(ULONGLONG id, SmartPacket& sendPacket)
 {
@@ -210,6 +211,34 @@ void NetServer::SendPacket(ULONGLONG id, Packet* pPacket)
 
 	// 인코딩
 	pPacket->SetHeader<Net>();
+	pPacket->IncreaseRefCnt();
+	pSession->sendPacketQ_.Enqueue(pPacket);
+	SendPost(pSession);
+	if (InterlockedDecrement(&pSession->IoCnt_) == 0)
+		ReleaseSession(pSession);
+}
+
+void NetServer::SendPacket_ALREADY_ENCODED(ULONGLONG id, Packet* pPacket)
+{
+	Session* pSession = pSessionArr_ + Session::GET_SESSION_INDEX(id);
+	long IoCnt = InterlockedIncrement(&pSession->IoCnt_);
+
+	// 이미 RELEASE 진행중이거나 RELEASE된 경우
+	if ((IoCnt & Session::RELEASE_FLAG) == Session::RELEASE_FLAG)
+	{
+		if (InterlockedDecrement(&pSession->IoCnt_) == 0)
+			ReleaseSession(pSession);
+		return;
+	}
+
+	// RELEASE 완료후 다시 세션에 대한 초기화가 완료된경우 즉 재활용
+	if (id != pSession->id_)
+	{
+		if (InterlockedDecrement(&pSession->IoCnt_) == 0)
+			ReleaseSession(pSession);
+		return;
+	}
+
 	pPacket->IncreaseRefCnt();
 	pSession->sendPacketQ_.Enqueue(pPacket);
 	SendPost(pSession);
