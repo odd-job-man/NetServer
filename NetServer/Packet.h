@@ -26,6 +26,7 @@ enum ServerType
 	Lan
 };
 
+static constexpr int ERR_PACKET_EXTRACT_FAIL = 5;
 
 #ifdef DEBUG_LEAK
 #include <list>
@@ -58,7 +59,7 @@ public:
 	static inline unsigned char PACKET_CODE;
 	static inline unsigned char FIXED_KEY;
 	static constexpr int RINGBUFFER_SIZE = 10000;
-	static constexpr int BUFFER_SIZE = (RINGBUFFER_SIZE / 8) + sizeof(NetHeader);
+	static constexpr int BUFFER_SIZE = 3000 + sizeof(NetHeader);
 
 	template<ServerType type>
 	void Clear(void)
@@ -78,7 +79,7 @@ public:
 	{
 		if (rear_ - front_ < sizeToGet)
 		{
-			return 0;
+			throw ERR_PACKET_EXTRACT_FAIL;
 		}
 		else
 		{
@@ -92,7 +93,7 @@ public:
 	{
 		if (rear_ - front_ < sizeToGet)
 		{
-			return 0;
+			return nullptr;
 		}
 		else
 		{
@@ -148,6 +149,9 @@ public:
 	}
 	Packet& operator >>(unsigned char& value)
 	{
+		if (rear_ - front_ < sizeof(value))
+			throw ERR_PACKET_EXTRACT_FAIL;
+
 		value = *(unsigned char*)(pBuffer_ + front_);
 		front_ += sizeof(value);
 		return *this;
@@ -155,12 +159,18 @@ public:
 
 	Packet& operator <<(const char value)
 	{
+		if (rear_ - front_ < sizeof(value))
+			throw ERR_PACKET_EXTRACT_FAIL;
+
 		*(char*)(pBuffer_ + rear_) = value;
 		rear_ += sizeof(value);
 		return *this;
 	}
 	Packet& operator >>(char& value)
 	{
+		if (rear_ - front_ < sizeof(value))
+			throw ERR_PACKET_EXTRACT_FAIL;
+
 		value = *(char*)(pBuffer_ + front_);
 		front_ += sizeof(value);
 		return *this;
@@ -174,6 +184,9 @@ public:
 	}
 	Packet& operator >>(short& value)
 	{
+		if (rear_ - front_ < sizeof(value))
+			throw ERR_PACKET_EXTRACT_FAIL;
+
 		value = *(short*)(pBuffer_ + front_);
 		front_ += sizeof(value);
 		return *this;
@@ -187,6 +200,9 @@ public:
 	}
 	Packet& operator >>(unsigned short& value)
 	{
+		if (rear_ - front_ < sizeof(value))
+			throw ERR_PACKET_EXTRACT_FAIL;
+
 		value = *(unsigned short*)(pBuffer_ + front_);
 		front_ += sizeof(value);
 		return *this;
@@ -200,6 +216,9 @@ public:
 	}
 	Packet& operator >>(int& value)
 	{
+		if (rear_ - front_ < sizeof(value))
+			throw ERR_PACKET_EXTRACT_FAIL;
+
 		value = *(int*)(pBuffer_ + front_);
 		front_ += sizeof(value);
 		return *this;
@@ -213,6 +232,9 @@ public:
 	}
 	Packet& operator >>(unsigned int& value)
 	{
+		if (rear_ - front_ < sizeof(value))
+			throw ERR_PACKET_EXTRACT_FAIL;
+
 		value = *(unsigned int*)(pBuffer_ + front_);
 		front_ += sizeof(value);
 		return *this;
@@ -227,6 +249,9 @@ public:
 
 	Packet& operator >>(long& value)
 	{
+		if (rear_ - front_ < sizeof(value))
+			throw ERR_PACKET_EXTRACT_FAIL;
+
 		value = *(long*)(pBuffer_ + front_);
 		front_ += sizeof(value);
 		return *this;
@@ -240,6 +265,9 @@ public:
 	}
 	Packet& operator >>(unsigned long& value)
 	{
+		if (rear_ - front_ < sizeof(value))
+			throw ERR_PACKET_EXTRACT_FAIL;
+
 		value = *(unsigned long*)(pBuffer_ + front_);
 		front_ += sizeof(value);
 		return *this;
@@ -254,6 +282,9 @@ public:
 
 	Packet& operator >>(__int64& value)
 	{
+		if (rear_ - front_ < sizeof(value))
+			throw ERR_PACKET_EXTRACT_FAIL;
+
 		value = *(__int64*)(pBuffer_ + front_);
 		front_ += sizeof(value);
 		return *this;
@@ -267,6 +298,9 @@ public:
 	}
 	Packet& operator >>(unsigned __int64& value)
 	{
+		if (rear_ - front_ < sizeof(value))
+			throw ERR_PACKET_EXTRACT_FAIL;
+
 		value = *(unsigned __int64*)(pBuffer_ + front_);
 		front_ += sizeof(value);
 		return *this;
@@ -280,6 +314,9 @@ public:
 	}
 	Packet& operator >>(float& value)
 	{
+		if (rear_ - front_ < sizeof(value))
+			throw ERR_PACKET_EXTRACT_FAIL;
+
 		value = *(float*)(pBuffer_ + front_);
 		front_ += sizeof(value);
 		return *this;
@@ -294,6 +331,9 @@ public:
 
 	Packet& operator >>(double& value)
 	{
+		if (rear_ - front_ < sizeof(value))
+			throw ERR_PACKET_EXTRACT_FAIL;
+
 		value = *(double*)(pBuffer_ + front_);
 		front_ += sizeof(value);
 		return *this;
@@ -414,8 +454,9 @@ public:
 	// 넷서버에서만 호출
 	bool ValidateReceived()
 	{
-		// 아예 얼토당토않은 패킷이 왓을때를 위한 검증
 		NetHeader* pHeader = (NetHeader*)pBuffer_;
+
+		// 아예 얼토당토않은 패킷이 왓을때를 위한 검증
 		if (pHeader->code_ != PACKET_CODE)
 			return false;
 

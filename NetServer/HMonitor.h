@@ -6,7 +6,7 @@ struct HMonitor
 {
 	HMonitor();
 	~HMonitor();
-	void UpdateCpuTime();
+	void UpdateCpuTime(ULONGLONG* pOutTickDiffPerSec_NULLABLE, ULONGLONG* pOutTotalTick_NULLABLE);
 	HANDLE _hProcess;
 	int _iNumberOfProcessors;
 

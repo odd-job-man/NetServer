@@ -46,14 +46,14 @@ public:
 
 public:
 	LONG lPlayerNum = 0;
-	LONG lAcceptTotal_PREV = 0;
-	alignas(64) LONG lAcceptTotal_ = 0;
-	alignas(64) LONG lRecvTPS_ = 0;
+	ULONGLONG acceptCounter_ = 0;
+	alignas(64) ULONGLONG acceptTotal_ = 0;
+	alignas(64) ULONGLONG recvTPS_ = 0;
 
 	// Send (Per MSG)
-	alignas(64) LONG lSendTPS_ = 0;
+	alignas(64) LONG sendTPS_ = 0;
 
 	// Disconnect
-	alignas(64) LONG lDisconnectTPS_ = 0;
+	alignas(64) ULONGLONG disconnectTPS_ = 0;
 };
 

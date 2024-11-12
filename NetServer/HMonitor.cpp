@@ -58,7 +58,7 @@ HMonitor::HMonitor()
 		__debugbreak();
 
 
-	UpdateCpuTime();
+	UpdateCpuTime(nullptr, nullptr);
 }
 
 HMonitor::~HMonitor()
@@ -69,7 +69,7 @@ HMonitor::~HMonitor()
 	PdhCloseQuery(NPBQuery);
 }
 
-void HMonitor::UpdateCpuTime()
+void HMonitor::UpdateCpuTime(ULONGLONG* pOutTickDiffPerSecElapsed_NULLABLE, ULONGLONG* pOutTotalTickElapsed_NULLABLE)
 {
 	ULARGE_INTEGER Idle;
 	ULARGE_INTEGER Kernel;
@@ -91,6 +91,7 @@ void HMonitor::UpdateCpuTime()
 	ULONGLONG IdleDiff = Idle.QuadPart - _ftProcessor_LastIdle.QuadPart;
 	ULONGLONG Total = KernelDiff + UserDiff;
 	ULONGLONG TimeDiff;
+
 
 	if (Total == 0)
 	{
@@ -143,6 +144,12 @@ void HMonitor::UpdateCpuTime()
 	UserDiff = User.QuadPart - _ftProcess_LastUser.QuadPart;
 	KernelDiff = Kernel.QuadPart - _ftProcess_LastKernel.QuadPart;
 	Total = KernelDiff + UserDiff;
+
+	if (pOutTickDiffPerSecElapsed_NULLABLE != nullptr && pOutTotalTickElapsed_NULLABLE != nullptr)
+	{
+		*pOutTickDiffPerSecElapsed_NULLABLE += Total;
+		*pOutTotalTickElapsed_NULLABLE += TimeDiff;
+	}
 
 	_fProcessTotal = (float)(Total / (double)_iNumberOfProcessors / (double)TimeDiff * 100.0f);
 	_fProcessKernel = (float)(KernelDiff / (double)_iNumberOfProcessors / (double)TimeDiff * 100.0f);

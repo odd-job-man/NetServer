@@ -255,34 +255,27 @@ void NetServer::Disconnect(ULONGLONG id)
 	if ((IoCnt & Session::RELEASE_FLAG) == Session::RELEASE_FLAG)
 	{
 		if (InterlockedDecrement(&pSession->IoCnt_) == 0)
-		{
 			ReleaseSession(pSession);
-			return;
-		}
+		return;
 	}
 
 	// RELEASE후 재활용까지 되엇을때
 	if (id != pSession->id_)
 	{
 		if (InterlockedDecrement(&pSession->IoCnt_) == 0)
-		{
 			ReleaseSession(pSession);
-			return;
-		}
+		return;
 	}
 
 	// Disconnect 1회 제한
-	if (pSession->bDisconnectCalled_ == true)
+	if (InterlockedExchange((LONG*)&pSession->bDisconnectCalled_, true) == true)
 	{
 		if (InterlockedDecrement(&pSession->IoCnt_) == 0)
-		{
 			ReleaseSession(pSession);
-			return;
-		}
+		return;
 	}
 
 	// 여기 도달햇다면 같은 세션에 대해서 RELEASE 조차 호출되지 않은상태임이 보장된다
-	pSession->bDisconnectCalled_ = true;
 	CancelIoEx((HANDLE)pSession->sock_, nullptr);
 
 	// CancelIoEx호출로 인해서 RELEASE가 호출되엇어야 햇지만 위에서의 InterlockedIncrement 때문에 호출이 안된 경우 업보청산
@@ -301,6 +294,8 @@ unsigned __stdcall NetServer::AcceptThread(LPVOID arg)
 	while (1)
 	{
 		clientSock = accept(pNetServer->hListenSock_, (SOCKADDR*)&clientAddr, &addrlen);
+		InterlockedIncrement((LONG*)&pNetServer->acceptCounter_);
+
 		if (clientSock == INVALID_SOCKET)
 		{
 			DWORD dwErrCode = WSAGetLastError();
@@ -317,7 +312,6 @@ unsigned __stdcall NetServer::AcceptThread(LPVOID arg)
 			continue;
 		}
 
-		InterlockedIncrement((LONG*)&pNetServer->lAcceptTotal_);
 		InterlockedIncrement((LONG*)&pNetServer->lSessionNum_);
 
 		short idx = pNetServer->DisconnectStack_.Pop().value();
@@ -358,9 +352,6 @@ unsigned __stdcall NetServer::IOCPWorkerThread(LPVOID arg)
 			if (bGQCSRet && dwNOBT == 0)
 				break;
 
-			//비정상 종료
-			//로깅을 하려햇으나 GQCS 에서 WSAGetLastError 값을 64로 덮어 써버린다.
-			//따라서 WSASend나 WSARecv, 둘 중 하나가 바로 실패하는 경우에만 로깅하는것으로...
 			if (!bGQCSRet && pOverlapped)
 				break;
 
@@ -414,7 +405,6 @@ BOOL NetServer::RecvPost(Session* pSession)
 		{
 			if (pSession->bDisconnectCalled_ == true)
 			{
-				InterlockedDecrement(&(pSession->IoCnt_));
 				CancelIoEx((HANDLE)pSession->sock_, nullptr);
 				return FALSE;
 			}
@@ -463,7 +453,7 @@ BOOL NetServer::SendPost(Session* pSession)
 	}
 
 	InterlockedExchange(&pSession->lSendBufNum_, i);
-	InterlockedAdd(&lSendTPS_, i);
+	InterlockedAdd(&sendTPS_, i);
 	InterlockedIncrement(&pSession->IoCnt_);
 	ZeroMemory(&(pSession->sendOverlapped), sizeof(WSAOVERLAPPED));
 	int iSendRet = WSASend(pSession->sock_, wsa, i, nullptr, 0, &(pSession->sendOverlapped), nullptr);
@@ -480,9 +470,7 @@ BOOL NetServer::SendPost(Session* pSession)
 			return TRUE;
 		}
 
-		//InterlockedExchange((LONG*)&pSession->bSendingInProgress_, FALSE);
 		InterlockedDecrement(&(pSession->IoCnt_));
-
 		if (dwErrCode == WSAECONNRESET)
 			return FALSE;
 
@@ -524,7 +512,7 @@ void NetServer::ReleaseSession(Session* pSession)
 	// OnRelease와 idx 푸시 순서가 바뀌어서 JOB_OnRelease 도착 이전에 새로운 플레이어에 대해 JOB_On_ACCEPT가 중복으로 도착햇음
 	OnRelease(pSession->id_);
 	DisconnectStack_.Push((short)(pSession - pSessionArr_));
-	InterlockedIncrement(&lDisconnectTPS_);
+	InterlockedIncrement(&disconnectTPS_);
 	InterlockedDecrement(&lSessionNum_);
 }
 
@@ -537,24 +525,33 @@ void NetServer::RecvProc(Session* pSession, int numberOfBytesTransferred)
 		if (pSession->bDisconnectCalled_ == true)
 			return;
 
-		Packet* pPacket = PACKET_ALLOC(Net);
-		if (pSession->recvRB_.Peek(pPacket->pBuffer_, sizeof(NetHeader)) == 0)
-		{
-			PACKET_FREE(pPacket);
+		Packet::NetHeader header;
+		if (pSession->recvRB_.Peek((char*)&header, sizeof(NetHeader)) == 0)
 			break;
+
+		if (header.code_ != Packet::PACKET_CODE)
+		{
+			Disconnect(pSession->id_);
+			return;
 		}
 
-		int payloadLen = ((NetHeader*)pPacket->pBuffer_)->payloadLen_;
-
-		if (pSession->recvRB_.GetUseSize() < sizeof(NetHeader) + payloadLen)
+		if (pSession->recvRB_.GetUseSize() < sizeof(NetHeader) + header.payloadLen_)
 		{
-			PACKET_FREE(pPacket);
+			if (header.payloadLen_ > BUFFER_SIZE)
+			{
+				Disconnect(pSession->id_);
+				return;
+			}
 			break;
 		}
+		InterlockedIncrement(&recvTPS_);
 
 		pSession->recvRB_.MoveOutPos(sizeof(NetHeader));
-		pSession->recvRB_.Dequeue(pPacket->GetPayloadStartPos<Net>(), payloadLen);
-		pPacket->MoveWritePos(payloadLen);
+
+		Packet* pPacket = PACKET_ALLOC(Net);
+		pSession->recvRB_.Dequeue(pPacket->GetPayloadStartPos<Net>(), header.payloadLen_);
+		pPacket->MoveWritePos(header.payloadLen_);
+		memcpy(pPacket->pBuffer_, &header, sizeof(Packet::NetHeader));
 
 		// 넷서버에서만 호출되는 함수로 검증 및 디코드후 체크섬 확인
 		if (pPacket->ValidateReceived() == false)
@@ -563,14 +560,17 @@ void NetServer::RecvProc(Session* pSession, int numberOfBytesTransferred)
 			Disconnect(pSession->id_);
 			return;
 		}
+
 		OnRecv(pSession->id_, pPacket);
-		InterlockedIncrement(&lRecvTPS_);
 	}
 	RecvPost(pSession);
 }
 
 void NetServer::SendProc(Session* pSession, DWORD dwNumberOfBytesTransferred)
 {
+	if (pSession->bDisconnectCalled_ == true)
+		return;
+
 	LONG sendBufNum = pSession->lSendBufNum_;
 	pSession->lSendBufNum_ = 0;
 	for (LONG i = 0; i < sendBufNum; ++i)
