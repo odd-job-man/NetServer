@@ -43,10 +43,10 @@ public:
 	static inline uint64_t identifier = 0;
 
 	const uint64_t identifier_;
-	alignas(64) uintptr_t metaTail_;
-	alignas(64) uintptr_t metaHead_;
-	alignas(64) uint64_t metaCnt_;
-	alignas(64) long num_;
+	uintptr_t metaTail_;
+	uintptr_t metaHead_;
+	uint64_t metaCnt_;
+	long num_;
 	CLockFreeQueue()
 		:metaCnt_{ 0 }, identifier_{ InterlockedIncrement(&identifier) - 1 }
 	{

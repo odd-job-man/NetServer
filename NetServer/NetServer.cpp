@@ -268,7 +268,7 @@ void NetServer::Disconnect(ULONGLONG id)
 	}
 
 	// Disconnect 1È¸ Á¦ÇÑ
-	if (InterlockedExchange((LONG*)&pSession->bDisconnectCalled_, true) == true)
+	if ((bool)InterlockedExchange((LONG*)&pSession->bDisconnectCalled_, true) == true)
 	{
 		if (InterlockedDecrement(&pSession->IoCnt_) == 0)
 			ReleaseSession(pSession);

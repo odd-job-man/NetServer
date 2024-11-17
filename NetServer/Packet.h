@@ -2,12 +2,14 @@
 #include <memory.h>
 #include "CLockFreeQueue.h"
 #include <stddef.h>
+#include <list>
 #include "Session.h"
 //#include "LanServer.h"
 #include "NetServer.h"
 
 #define QUEUE
 #include "CTlsObjectPool.h"
+#include "Logger.h"
 
 
 //#define DEBUG_LEAK
@@ -27,10 +29,13 @@ enum ServerType
 };
 
 static constexpr int ERR_PACKET_EXTRACT_FAIL = 5;
+static constexpr int ERR_PACKET_RESIZE_FAIL = 6;
 
 #ifdef DEBUG_LEAK
 #include <list>
 #include "CLinkedList.h"
+#include "Logger.h"
+#include "Logger.h"
 #define PACKET_ALLOC(type) Packet::AllocForDebugLeak<type>(__func__)
 #define PACKET_FREE(pPacket) Packet::FreeForDebugLeak(pPacket);
 #else
@@ -59,7 +64,29 @@ public:
 	static inline unsigned char PACKET_CODE;
 	static inline unsigned char FIXED_KEY;
 	static constexpr int RINGBUFFER_SIZE = 10000;
-	static constexpr int BUFFER_SIZE = 3000 + sizeof(NetHeader);
+	int bufferSize_ = 300 + sizeof(NetHeader);
+
+	bool Resize()
+	{
+		if (bufferSize_ == RINGBUFFER_SIZE)
+			return false;
+
+		int prevPayloadSize = bufferSize_ - sizeof(NetHeader);
+		int newBufferSize = prevPayloadSize * 2 + sizeof(NetHeader);
+
+		if (newBufferSize > RINGBUFFER_SIZE)
+			bufferSize_ = RINGBUFFER_SIZE;
+		else
+			bufferSize_ = newBufferSize;
+
+		char* pBuffer = new char[newBufferSize];
+		memcpy(pBuffer, pBuffer_, rear_ - front_ + sizeof(NetHeader));
+		delete[] pBuffer_;
+
+		pBuffer_ = pBuffer;
+		LOG(L"RESIZE", SYSTEM, TEXTFILE, L"RESIZE To %d",newBufferSize);
+		return true;
+	}
 
 	template<ServerType type>
 	void Clear(void)
@@ -105,6 +132,12 @@ public:
 
 	int PutData(char* pSrc, int sizeToPut)
 	{
+		if (bufferSize_ - rear_ < sizeToPut)
+		{
+			if (Resize() == false)
+				return 0;
+		}
+
 		memcpy_s(pBuffer_ + rear_, sizeToPut, pSrc, sizeToPut);
 		rear_ += sizeToPut;
 		return sizeToPut;
@@ -143,6 +176,12 @@ public:
 
 	Packet& operator <<(const unsigned char value)
 	{
+		if (bufferSize_ - rear_ < sizeof(value))
+		{
+			if (Resize() == false)
+				throw ERR_PACKET_RESIZE_FAIL;
+		}
+
 		*(unsigned char*)(pBuffer_ + rear_) = value;
 		rear_ += sizeof(value);
 		return *this;
@@ -159,8 +198,11 @@ public:
 
 	Packet& operator <<(const char value)
 	{
-		if (rear_ - front_ < sizeof(value))
-			throw ERR_PACKET_EXTRACT_FAIL;
+		if (bufferSize_ - rear_ < sizeof(value))
+		{
+			if (Resize() == false)
+				throw ERR_PACKET_RESIZE_FAIL;
+		}
 
 		*(char*)(pBuffer_ + rear_) = value;
 		rear_ += sizeof(value);
@@ -178,6 +220,12 @@ public:
 
 	Packet& operator <<(const short value)
 	{
+		if (bufferSize_ - rear_ < sizeof(value))
+		{
+			if (Resize() == false)
+				throw ERR_PACKET_RESIZE_FAIL;
+		}
+
 		*(short*)(pBuffer_ + rear_) = value;
 		rear_ += sizeof(value);
 		return *this;
@@ -194,6 +242,12 @@ public:
 
 	Packet& operator <<(const unsigned short value)
 	{
+		if (bufferSize_ - rear_ < sizeof(value))
+		{
+			if (Resize() == false)
+				throw ERR_PACKET_RESIZE_FAIL;
+		}
+
 		*(unsigned short*)(pBuffer_ + rear_) = value;
 		rear_ += sizeof(value);
 		return *this;
@@ -210,6 +264,12 @@ public:
 
 	Packet& operator <<(const int value)
 	{
+		if (bufferSize_ - rear_ < sizeof(value))
+		{
+			if (Resize() == false)
+				throw ERR_PACKET_RESIZE_FAIL;
+		}
+
 		*(int*)(pBuffer_ + rear_) = value;
 		rear_ += sizeof(value);
 		return *this;
@@ -226,6 +286,12 @@ public:
 
 	Packet& operator <<(const unsigned int value)
 	{
+		if (bufferSize_ - rear_ < sizeof(value))
+		{
+			if (Resize() == false)
+				throw ERR_PACKET_RESIZE_FAIL;
+		}
+
 		*(unsigned int*)(pBuffer_ + rear_) = value;
 		rear_ += sizeof(value);
 		return *this;
@@ -242,6 +308,12 @@ public:
 
 	Packet& operator <<(const long value)
 	{
+		if (bufferSize_ - rear_ < sizeof(value))
+		{
+			if (Resize() == false)
+				throw ERR_PACKET_RESIZE_FAIL;
+		}
+
 		*(long*)(pBuffer_ + rear_) = value;
 		rear_ += sizeof(value);
 		return *this;
@@ -259,6 +331,12 @@ public:
 
 	Packet& operator <<(const unsigned long value)
 	{
+		if (bufferSize_ - rear_ < sizeof(value))
+		{
+			if (Resize() == false)
+				throw ERR_PACKET_RESIZE_FAIL;
+		}
+
 		*(unsigned long*)(pBuffer_ + rear_) = value;
 		rear_ += sizeof(value);
 		return *this;
@@ -275,6 +353,12 @@ public:
 
 	Packet& operator <<(const __int64 value)
 	{
+		if (bufferSize_ - rear_ < sizeof(value))
+		{
+			if (Resize() == false)
+				throw ERR_PACKET_RESIZE_FAIL;
+		}
+
 		*(__int64*)(pBuffer_ + rear_) = value;
 		rear_ += sizeof(value);
 		return *this;
@@ -292,6 +376,12 @@ public:
 
 	Packet& operator <<(const unsigned __int64 value)
 	{
+		if (bufferSize_ - rear_ < sizeof(value))
+		{
+			if (Resize() == false)
+				throw ERR_PACKET_RESIZE_FAIL;
+		}
+
 		*(unsigned __int64*)(pBuffer_ + rear_) = value;
 		rear_ += sizeof(value);
 		return *this;
@@ -308,6 +398,12 @@ public:
 
 	Packet& operator <<(const float value)
 	{
+		if (bufferSize_ - rear_ < sizeof(value))
+		{
+			if (Resize() == false)
+				throw ERR_PACKET_RESIZE_FAIL;
+		}
+
 		*(float*)(pBuffer_ + rear_) = value;
 		rear_ += sizeof(value);
 		return *this;
@@ -324,6 +420,12 @@ public:
 
 	Packet& operator <<(const double value)
 	{
+		if (bufferSize_ - rear_ < sizeof(value))
+		{
+			if (Resize() == false)
+				throw ERR_PACKET_RESIZE_FAIL;
+		}
+
 		*(double*)(pBuffer_ + rear_) = value;
 		rear_ += sizeof(value);
 		return *this;
@@ -357,7 +459,7 @@ public:
 #endif
 #endif
 	{
-		pBuffer_ = new char[BUFFER_SIZE];
+		pBuffer_ = new char[bufferSize_];
 #ifdef DEBUG_LEAK
 #ifndef DEBUG_LEAK_STD_LIST
 		InitializeCriticalSection(&cs_for_log_list_);
