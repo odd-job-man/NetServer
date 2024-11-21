@@ -129,7 +129,6 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="CpuUsage.cpp" />
     <ClCompile Include="HMonitor.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="NetServer.cpp" />

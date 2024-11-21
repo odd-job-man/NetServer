@@ -447,7 +447,7 @@ public:
 	LONG refCnt_ = 0;
 	bool bEncoded_;
 public:
-	unsigned short playerIdx_;
+	ULONGLONG sessionID_;
 	RecvType recvType_;
 
 #pragma warning(disable : 26495)

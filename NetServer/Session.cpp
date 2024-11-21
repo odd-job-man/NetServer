@@ -9,7 +9,8 @@ BOOL Session::Init(SOCKET clientSock, ULONGLONG ullClientID, SHORT shIdx)
 {
     sock_ = clientSock;
     bSendingInProgress_ = FALSE;
-    id_ = ((ullClientID << 16) ^ shIdx);
+    InterlockedExchange(&id_, ((ullClientID << 16) ^ shIdx));
+    lastRecvTime = GetTickCount64();
     bDisconnectCalled_ = false;
     lSendBufNum_ = 0;
     recvRB_.ClearBuffer();

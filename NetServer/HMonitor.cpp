@@ -1,5 +1,6 @@
 #include "HMonitor.h"
 #include <string>
+#pragma comment(lib,"pdh.lib")
 
 HMonitor::HMonitor()
 {

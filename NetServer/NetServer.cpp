@@ -38,7 +38,8 @@ NetServer::NetServer()
 	IOCP_WORKER_THREAD_NUM_ = (DWORD)_wtoi((LPCWSTR)pStart);
 
 	GetValue(psr, L"IOCP_ACTIVE_THREAD", (PVOID*)&pStart, nullptr);
-	DWORD IOCP_ACTIVE_THREAD_NUM = (DWORD)_wtoi((LPCWSTR)pStart);
+	IOCP_ACTIVE_THREAD_NUM_ = (DWORD)_wtoi((LPCWSTR)pStart);
+	updateThreadSendCounter_ = IOCP_ACTIVE_THREAD_NUM_;
 
 	GetValue(psr, L"IS_ZERO_BYTE_SEND", (PVOID*)&pStart, nullptr);
 	int bZeroByteSend = _wtoi((LPCWSTR)pStart);
@@ -54,6 +55,9 @@ NetServer::NetServer()
 
 	GetValue(psr, L"TIME_OUT_MILLISECONDS", (PVOID*)&pStart, nullptr);
 	TIME_OUT_MILLISECONDS_ = _wtoi((LPCWSTR)pStart);
+
+	GetValue(psr, L"TIME_OUT_CHECK_INTERVAL", (PVOID*)&pStart, nullptr);
+	TIME_OUT_CHECK_INTERVAL_ = (ULONGLONG)_wtoi((LPCWSTR)pStart);
 	ReleaseParser(psr);
 
 #ifdef DEBUG_LEAK
@@ -69,7 +73,7 @@ NetServer::NetServer()
 	}
 	LOG(L"ONOFF", SYSTEM, TEXTFILE, L"WSAStartUp OK!");
 	// NOCT에 0들어가면 논리프로세서 수만큼을 설정함
-	hcp_ = CreateIoCompletionPort(INVALID_HANDLE_VALUE, nullptr, 0, IOCP_ACTIVE_THREAD_NUM);
+	hcp_ = CreateIoCompletionPort(INVALID_HANDLE_VALUE, nullptr, 0, IOCP_ACTIVE_THREAD_NUM_);
 	if (!hcp_)
 	{
 		LOG(L"ONOFF", SYSTEM, TEXTFILE, L"CreateIoCompletionPort Fail ErrCode : %u", WSAGetLastError());
@@ -155,6 +159,19 @@ NetServer::NetServer()
 		__debugbreak();
 	}
 	LOG(L"ONOFF", SYSTEM, TEXTFILE, L"MAKE AccpetThread OK!");
+
+	//hTimeOutThread_ = (HANDLE)_beginthreadex(NULL, 0, TimeOutThreadFunc, this, CREATE_SUSPENDED, nullptr);
+	//if(!hTimeOutThread_)
+	//{
+	//	LOG(L"ONOFF", SYSTEM, TEXTFILE, L"MAKE hTimeOutThread_ Fail ErrCode : %u", WSAGetLastError());
+	//	__debugbreak();
+	//}
+	//LOG(L"ONOFF", SYSTEM, TEXTFILE, L"MAKE TimeOutThread OK!");
+
+	//TerminateTimeoutEvent_ = CreateEvent(NULL, FALSE, FALSE, NULL);
+	SendPostFrameOverlapped.why = OVERLAPPED_REASON::SEND_POST_FRAME;
+	SendPostEndEvent_ = CreateEvent(NULL, FALSE, FALSE, NULL);
+	OnPostOverlapped.why = OVERLAPPED_REASON::POST;
 }
 
 
@@ -246,6 +263,34 @@ void NetServer::SendPacket_ALREADY_ENCODED(ULONGLONG id, Packet* pPacket)
 		ReleaseSession(pSession);
 }
 
+void NetServer::SendPacket_ENQUEUE_ONLY(ULONGLONG id, Packet* pPacket)
+{
+	Session* pSession = pSessionArr_ + Session::GET_SESSION_INDEX(id);
+	long IoCnt = InterlockedIncrement(&pSession->IoCnt_);
+
+	// 이미 RELEASE 진행중이거나 RELEASE된 경우
+	if ((IoCnt & Session::RELEASE_FLAG) == Session::RELEASE_FLAG)
+	{
+		if (InterlockedDecrement(&pSession->IoCnt_) == 0)
+			ReleaseSession(pSession);
+		return;
+	}
+
+	// RELEASE 완료후 다시 세션에 대한 초기화가 완료된경우 즉 재활용
+	if (id != pSession->id_)
+	{
+		if (InterlockedDecrement(&pSession->IoCnt_) == 0)
+			ReleaseSession(pSession);
+		return;
+	}
+
+	pPacket->SetHeader<Net>();
+	pPacket->IncreaseRefCnt();
+	pSession->sendPacketQ_.Enqueue(pPacket);
+	if (InterlockedDecrement(&pSession->IoCnt_) == 0)
+		ReleaseSession(pSession);
+}
+
 void NetServer::Disconnect(ULONGLONG id)
 {
 	Session* pSession = pSessionArr_ + Session::GET_SESSION_INDEX(id);
@@ -281,6 +326,65 @@ void NetServer::Disconnect(ULONGLONG id)
 	// CancelIoEx호출로 인해서 RELEASE가 호출되엇어야 햇지만 위에서의 InterlockedIncrement 때문에 호출이 안된 경우 업보청산
 	if (InterlockedDecrement(&pSession->IoCnt_) == 0)
 		ReleaseSession(pSession);
+}
+
+void NetServer::ProcessTimeOut()
+{
+	ULONGLONG currentTime = GetTickCount64();
+	for (int i = 0; i < maxSession_; ++i)
+	{
+		ULONGLONG sessionId = pSessionArr_[i].id_;
+
+		if ((pSessionArr_[i].IoCnt_ & Session::RELEASE_FLAG) == Session::RELEASE_FLAG)
+			continue;
+
+		if (currentTime < pSessionArr_[i].lastRecvTime + TIME_OUT_MILLISECONDS_)
+			continue;
+
+		Disconnect(sessionId);
+	}
+}
+
+void NetServer::SendPostPerFrame_IMPL(LONG* pCounter)
+{
+	static LONG Cnt = 0;
+
+	while(true)
+	{
+		LONG idx = InterlockedIncrement(&Cnt) - 1;
+		if (idx >= maxSession_)
+			break;
+
+		Session* pSession = pSessionArr_ + idx;
+		long IoCnt = InterlockedIncrement(&pSession->IoCnt_);
+
+		// 이미 RELEASE 진행중이거나 RELEASE된 경우
+		if ((IoCnt & Session::RELEASE_FLAG) == Session::RELEASE_FLAG)
+		{
+			if (InterlockedDecrement(&pSession->IoCnt_) == 0)
+				ReleaseSession(pSession);
+			continue;
+		}
+
+		SendPost(pSession);
+
+		if (InterlockedDecrement(&pSession->IoCnt_) == 0)
+			ReleaseSession(pSession);
+	}
+
+	if (InterlockedDecrement(&updateThreadSendCounter_) == 0)
+	{
+		InterlockedExchange(&Cnt, 0);
+		SetEvent(SendPostEndEvent_);
+	}
+}
+
+void NetServer::SendPostPerFrame()
+{
+	updateThreadSendCounter_ = 3;
+	for(int i = 0; i < 3; ++i)
+		PostQueuedCompletionStatus(hcp_, 1, 1, (LPOVERLAPPED)&SendPostFrameOverlapped);
+	WaitForSingleObject(SendPostEndEvent_, INFINITE);
 }
 
 unsigned __stdcall NetServer::AcceptThread(LPVOID arg)
@@ -338,10 +442,10 @@ unsigned __stdcall NetServer::IOCPWorkerThread(LPVOID arg)
 	NetServer* pNetServer = (NetServer*)arg;
 	while (1)
 	{
-		WSAOVERLAPPED* pOverlapped = nullptr;
+		MYOVERLAPPED* pOverlapped = nullptr;
 		DWORD dwNOBT = 0;
 		Session* pSession = nullptr;
-		bool bPost = false;
+		bool bContinue = false;
 		BOOL bGQCSRet = GetQueuedCompletionStatus(pNetServer->hcp_, &dwNOBT, (PULONG_PTR)&pSession, (LPOVERLAPPED*)&pOverlapped, INFINITE);
 		do
 		{
@@ -355,30 +459,55 @@ unsigned __stdcall NetServer::IOCPWorkerThread(LPVOID arg)
 			if (!bGQCSRet && pOverlapped)
 				break;
 
-			// PQCS로 할일 쐇을떄 대응용
-			if (dwNOBT == 1 && (ULONG_PTR)pSession == 1)
+			switch (pOverlapped->why)
 			{
-#pragma warning(disable : 4311)
-#pragma warning(disable : 4302)
-				pNetServer->OnPost((int)pOverlapped);
-				bPost = true;
-				break;
-#pragma warning(default: 4311)
-#pragma warning(default: 4302)
-			}
-
-			if (&pSession->recvOverlapped == pOverlapped)
-				pNetServer->RecvProc(pSession, dwNOBT);
-			else
+			case OVERLAPPED_REASON::SEND:
 				pNetServer->SendProc(pSession, dwNOBT);
+				break;
+			case OVERLAPPED_REASON::RECV:
+				pNetServer->RecvProc(pSession, dwNOBT);
+				break;
+			case OVERLAPPED_REASON::TIMEOUT:
+				pNetServer->ProcessTimeOut();
+				bContinue = true;
+				break;
+			case OVERLAPPED_REASON::SEND_POST_FRAME:
+				pNetServer->SendPostPerFrame_IMPL((LONG*)pSession);
+				bContinue = true;
+				break;
+			case OVERLAPPED_REASON::POST:
+				pNetServer->OnPost(pSession);
+				bContinue = true;
+				break;
+			default:
+				__debugbreak();
+			}
 
 		} while (0);
 
-		if (bPost == true)
+		if (bContinue)
 			continue;
 
 		if (InterlockedDecrement(&pSession->IoCnt_) == 0)
 			pNetServer->ReleaseSession(pSession);
+	}
+	return 0;
+}
+
+unsigned __stdcall NetServer::TimeOutThreadFunc(LPVOID arg)
+{
+	NetServer* pNetServer = (NetServer*)arg;
+	MYOVERLAPPED overlapped;
+	// 지역변수라 큰일날일없음
+	overlapped.why = OVERLAPPED_REASON::TIMEOUT;
+
+	while (true)
+	{
+		DWORD waitRet = WaitForSingleObject(pNetServer->TerminateTimeoutEvent_, pNetServer->TIME_OUT_CHECK_INTERVAL_);
+		if (waitRet != WAIT_TIMEOUT)
+			break;
+
+		PostQueuedCompletionStatus(pNetServer->hcp_, 1, 1, (LPOVERLAPPED)&overlapped);
 	}
 	return 0;
 }
@@ -395,9 +524,10 @@ BOOL NetServer::RecvPost(Session* pSession)
 	wsa[1].len = pSession->recvRB_.GetFreeSize() - wsa[0].len;
 
 	ZeroMemory(&pSession->recvOverlapped, sizeof(WSAOVERLAPPED));
+	pSession->recvOverlapped.why = OVERLAPPED_REASON::RECV;
 	DWORD flags = 0;
 	InterlockedIncrement(&pSession->IoCnt_);
-	int iRecvRet = WSARecv(pSession->sock_, wsa, 2, nullptr, &flags, &(pSession->recvOverlapped), nullptr);
+	int iRecvRet = WSARecv(pSession->sock_, wsa, 2, nullptr, &flags, (LPWSAOVERLAPPED)&(pSession->recvOverlapped), nullptr);
 	if (iRecvRet == SOCKET_ERROR)
 	{
 		DWORD dwErrCode = WSAGetLastError();
@@ -455,8 +585,9 @@ BOOL NetServer::SendPost(Session* pSession)
 	InterlockedExchange(&pSession->lSendBufNum_, i);
 	InterlockedAdd(&sendTPS_, i);
 	InterlockedIncrement(&pSession->IoCnt_);
-	ZeroMemory(&(pSession->sendOverlapped), sizeof(WSAOVERLAPPED));
-	int iSendRet = WSASend(pSession->sock_, wsa, i, nullptr, 0, &(pSession->sendOverlapped), nullptr);
+	ZeroMemory(&(pSession->sendOverlapped.overlapped), sizeof(WSAOVERLAPPED));
+	pSession->sendOverlapped.why = OVERLAPPED_REASON::SEND;
+	int iSendRet = WSASend(pSession->sock_, wsa, i, nullptr, 0, (LPWSAOVERLAPPED)&(pSession->sendOverlapped), nullptr);
 	if (iSendRet == SOCKET_ERROR)
 	{
 		DWORD dwErrCode = WSAGetLastError();
@@ -544,7 +675,6 @@ void NetServer::RecvProc(Session* pSession, int numberOfBytesTransferred)
 			}
 			break;
 		}
-		InterlockedIncrement(&recvTPS_);
 
 		pSession->recvRB_.MoveOutPos(sizeof(NetHeader));
 
@@ -561,6 +691,8 @@ void NetServer::RecvProc(Session* pSession, int numberOfBytesTransferred)
 			return;
 		}
 
+		pSession->lastRecvTime = GetTickCount64();
+		InterlockedIncrement(&recvTPS_);
 		OnRecv(pSession->id_, pPacket);
 	}
 	RecvPost(pSession);
