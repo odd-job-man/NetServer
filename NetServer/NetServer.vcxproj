@@ -146,6 +146,7 @@
     <ClInclude Include="HMonitor.h" />
     <ClInclude Include="IHandler.h" />
     <ClInclude Include="Logger.h" />
+    <ClInclude Include="MYOVERLAPPED.h" />
     <ClInclude Include="NetServer.h" />
     <ClInclude Include="Packet.h" />
     <ClInclude Include="Parser.h" />
