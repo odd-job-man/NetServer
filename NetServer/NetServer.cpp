@@ -58,6 +58,9 @@ NetServer::NetServer()
 
 	GetValue(psr, L"TIME_OUT_CHECK_INTERVAL", (PVOID*)&pStart, nullptr);
 	TIME_OUT_CHECK_INTERVAL_ = (ULONGLONG)_wtoi((LPCWSTR)pStart);
+
+	GetValue(psr, L"bAccSend", (PVOID*)&pStart, nullptr);
+	bAccSend = (int)_wtoi((LPCWSTR)pStart);
 	ReleaseParser(psr);
 
 #ifdef DEBUG_LEAK
@@ -379,10 +382,38 @@ void NetServer::SendPostPerFrame_IMPL(LONG* pCounter)
 	}
 }
 
+void NetServer::SendPostPerFrame_IMPL_UPDATE()
+{
+	LONG idx = 0;
+	while (true)
+	{
+		if (idx >= maxSession_)
+			break;
+
+		Session* pSession = pSessionArr_ + idx;
+		long IoCnt = InterlockedIncrement(&pSession->IoCnt_);
+
+		// 이미 RELEASE 진행중이거나 RELEASE된 경우
+		if ((IoCnt & Session::RELEASE_FLAG) == Session::RELEASE_FLAG)
+		{
+			if (InterlockedDecrement(&pSession->IoCnt_) == 0)
+				ReleaseSession(pSession);
+			++idx;
+			continue;
+		}
+
+		SendPost(pSession);
+
+		if (InterlockedDecrement(&pSession->IoCnt_) == 0)
+			ReleaseSession(pSession);
+		++idx;
+	}
+}
+
 void NetServer::SendPostPerFrame()
 {
-	updateThreadSendCounter_ = 3;
-	for(int i = 0; i < 3; ++i)
+	updateThreadSendCounter_ = 1;
+	for(int i = 0; i < 2; ++i)
 		PostQueuedCompletionStatus(hcp_, 1, 1, (LPOVERLAPPED)&SendPostFrameOverlapped);
 	WaitForSingleObject(SendPostEndEvent_, INFINITE);
 }
@@ -553,23 +584,26 @@ BOOL NetServer::RecvPost(Session* pSession)
 
 BOOL NetServer::SendPost(Session* pSession)
 {
-	if (pSession->bDisconnectCalled_ == true)
-		return TRUE;
-
-	// 현재 값을 TRUE로 바꾼다. 원래 TRUE엿다면 반환값이 TRUE일것이며 그렇다면 현재 SEND 진행중이기 때문에 그냥 빠저나간다
-	// 이 조건문의 위치로 인하여 Out은 바뀌지 않을것임이 보장된다.
-	// 하지만 SendPost 실행주체가 Send완료통지 스레드인 경우에는 in의 위치는 SendPacket으로 인해서 바뀔수가 있다.
-	// iUseSize를 구하는 시점에서의 DirectDequeueSize의 값이 달라질수있다.
-	if (InterlockedExchange((LONG*)&pSession->bSendingInProgress_, TRUE) == TRUE)
-		return TRUE;
-
-	// SendPacket에서 in을 옮겨서 UseSize가 0보다 커진시점에서 Send완료통지가 도착해서 Out을 옮기고 플래그 해제 Recv완료통지 스레드가 먼저 SendPost에 도달해 플래그를 선점한경우 UseSize가 0이나온다.
-	// 여기서 flag를 다시 FALSE로 바꾸어주지 않아서 멈춤발생
-	DWORD dwBufferNum = pSession->sendPacketQ_.GetSize();
-	if (dwBufferNum == 0)
+	DWORD dwBufferNum;
+	while (1)
 	{
-		InterlockedExchange((LONG*)&pSession->bSendingInProgress_, FALSE);
-		return TRUE;
+		if (pSession->sendPacketQ_.GetSize() <= 0)
+			return FALSE;
+
+		// 현재 값을 TRUE로 바꾼다. 원래 TRUE엿다면 반환값이 TRUE일것이며 그렇다면 현재 SEND 진행중이기 때문에 그냥 빠저나간다
+		// 이 조건문의 위치로 인하여 Out은 바뀌지 않을것임이 보장된다.
+		// 하지만 SendPost 실행주체가 Send완료통지 스레드인 경우에는 in의 위치는 SendPacket으로 인해서 바뀔수가 있다.
+		// iUseSize를 구하는 시점에서의 DirectDequeueSize의 값이 달라질수있다.
+		if (InterlockedExchange((LONG*)&pSession->bSendingInProgress_, TRUE) == TRUE)
+			return TRUE;
+
+		// SendPacket에서 in을 옮겨서 UseSize가 0보다 커진시점에서 Send완료통지가 도착해서 Out을 옮기고 플래그 해제 Recv완료통지 스레드가 먼저 SendPost에 도달해 플래그를 선점한경우 UseSize가 0이나온다.
+		// 여기서 flag를 다시 FALSE로 바꾸어주지 않아서 멈춤발생
+		dwBufferNum = pSession->sendPacketQ_.GetSize();
+		if (dwBufferNum <= 0)
+			InterlockedExchange((LONG*)&pSession->bSendingInProgress_, FALSE);
+		else
+			break;
 	}
 
 	WSABUF wsa[50];
@@ -715,6 +749,19 @@ void NetServer::SendProc(Session* pSession, DWORD dwNumberOfBytesTransferred)
 	}
 
 	InterlockedExchange((LONG*)&pSession->bSendingInProgress_, FALSE);
-	if (pSession->sendPacketQ_.GetSize() > 0)
-		SendPost(pSession);
+	SendPost(pSession);
+}
+
+void NetServer::SENDPACKET(ULONGLONG id, SmartPacket& sendPacket)
+{
+	if (bAccSend == 1)
+		SendPacket_ENQUEUE_ONLY(id, sendPacket.GetPacket());
+	else
+		SendPacket(id, sendPacket.GetPacket());
+}
+
+void NetServer::SEND_POST_PER_FRAME()
+{
+	if (bAccSend == 1)
+		SendPostPerFrame();
 }

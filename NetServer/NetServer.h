@@ -3,6 +3,7 @@
 #include "CLockFreeStack.h"
 #include "MyOVERLAPPED.h"
 
+
 class Stack;
 class SmartPacket;
 
@@ -10,6 +11,10 @@ class NetServer : public IHandler
 {
 public:
 	NetServer();
+	// Test¿ë
+	void SENDPACKET(ULONGLONG id, SmartPacket& sendPacket);
+	void SEND_POST_PER_FRAME();
+
 	void SendPacket(ULONGLONG id, SmartPacket& sendPacket);
 	void SendPacket(ULONGLONG id, Packet* pPacket);
 	void SendPacket_ALREADY_ENCODED(ULONGLONG id, Packet* pPacket);
@@ -25,6 +30,8 @@ public:
 	void SendPostPerFrame();
 protected:
 	void SendPostPerFrame_IMPL(LONG* pCounter);
+public:
+	void SendPostPerFrame_IMPL_UPDATE();
 private:
 	void ProcessTimeOut();
 	static unsigned __stdcall AcceptThread(LPVOID arg);
@@ -57,6 +64,8 @@ public:
 	void RecvProc(Session* pSession, int numberOfBytesTransferred);
 	void SendProc(Session* pSession, DWORD dwNumberOfBytesTransferred);
 	friend class Packet;
+
+	int bAccSend = 0;
 	// Monitoring º¯¼ö
 	// Recv (Per MSG)
 
