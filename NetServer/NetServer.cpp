@@ -175,6 +175,7 @@ NetServer::NetServer()
 	SendPostFrameOverlapped.why = OVERLAPPED_REASON::SEND_POST_FRAME;
 	SendPostEndEvent_ = CreateEvent(NULL, FALSE, FALSE, NULL);
 	OnPostOverlapped.why = OVERLAPPED_REASON::POST;
+	SendWorkerOverlapped.why = OVERLAPPED_REASON::SEND_WORKER;
 }
 
 
@@ -204,6 +205,16 @@ void NetServer::SendPacket(ULONGLONG id, SmartPacket& sendPacket)
 	sendPacket->IncreaseRefCnt();
 	pSession->sendPacketQ_.Enqueue(sendPacket.GetPacket());
 	SendPost(pSession);
+
+	//if (pSession->bSendingInProgress_ == FALSE)
+	//{
+	//	if (InterlockedExchange((LONG*)&pSession->bSendingAtWorker_, TRUE) == FALSE)
+	//	{
+	//		InterlockedIncrement(&pSession->IoCnt_);
+	//		PostQueuedCompletionStatus(hcp_, 1, (ULONG_PTR)pSession, (LPOVERLAPPED)&SendWorkerOverlapped);
+	//	}
+	//}
+
 	if (InterlockedDecrement(&pSession->IoCnt_) == 0)
 		ReleaseSession(pSession);
 }
@@ -233,6 +244,16 @@ void NetServer::SendPacket(ULONGLONG id, Packet* pPacket)
 	pPacket->SetHeader<Net>();
 	pPacket->IncreaseRefCnt();
 	pSession->sendPacketQ_.Enqueue(pPacket);
+
+	//if (pSession->bSendingInProgress_ == FALSE)
+	//{
+	//	if (InterlockedExchange((LONG*)&pSession->bSendingAtWorker_, TRUE) == FALSE)
+	//	{
+	//		InterlockedIncrement(&pSession->IoCnt_);
+	//		PostQueuedCompletionStatus(hcp_, 1, (ULONG_PTR)pSession, (LPOVERLAPPED)&SendWorkerOverlapped);
+	//	}
+	//}
+
 	SendPost(pSession);
 	if (InterlockedDecrement(&pSession->IoCnt_) == 0)
 		ReleaseSession(pSession);
@@ -261,6 +282,15 @@ void NetServer::SendPacket_ALREADY_ENCODED(ULONGLONG id, Packet* pPacket)
 
 	pPacket->IncreaseRefCnt();
 	pSession->sendPacketQ_.Enqueue(pPacket);
+	//if (pSession->bSendingInProgress_ == FALSE)
+	//{
+	//	if (InterlockedExchange((LONG*)&pSession->bSendingAtWorker_, TRUE) == FALSE)
+	//	{
+	//		InterlockedIncrement(&pSession->IoCnt_);
+	//		PostQueuedCompletionStatus(hcp_, 1, (ULONG_PTR)pSession, (LPOVERLAPPED)&SendWorkerOverlapped);
+	//	}
+	//}
+
 	SendPost(pSession);
 	if (InterlockedDecrement(&pSession->IoCnt_) == 0)
 		ReleaseSession(pSession);
@@ -296,6 +326,7 @@ void NetServer::SendPacket_ENQUEUE_ONLY(ULONGLONG id, Packet* pPacket)
 
 void NetServer::Disconnect(ULONGLONG id)
 {
+	__debugbreak();
 	Session* pSession = pSessionArr_ + Session::GET_SESSION_INDEX(id);
 	long IoCnt = InterlockedIncrement(&pSession->IoCnt_);
 
@@ -316,7 +347,7 @@ void NetServer::Disconnect(ULONGLONG id)
 	}
 
 	// Disconnect 1회 제한
-	if ((bool)InterlockedExchange((LONG*)&pSession->bDisconnectCalled_, true) == true)
+	if ((bool)InterlockedExchange((LONG*)&pSession->bDisconnectCalled_, TRUE) == TRUE)
 	{
 		if (InterlockedDecrement(&pSession->IoCnt_) == 0)
 			ReleaseSession(pSession);
@@ -369,7 +400,7 @@ void NetServer::SendPostPerFrame_IMPL(LONG* pCounter)
 			continue;
 		}
 
-		SendPost(pSession);
+		SendPostAccum(pSession);
 
 		if (InterlockedDecrement(&pSession->IoCnt_) == 0)
 			ReleaseSession(pSession);
@@ -382,33 +413,6 @@ void NetServer::SendPostPerFrame_IMPL(LONG* pCounter)
 	}
 }
 
-void NetServer::SendPostPerFrame_IMPL_UPDATE()
-{
-	LONG idx = 0;
-	while (true)
-	{
-		if (idx >= maxSession_)
-			break;
-
-		Session* pSession = pSessionArr_ + idx;
-		long IoCnt = InterlockedIncrement(&pSession->IoCnt_);
-
-		// 이미 RELEASE 진행중이거나 RELEASE된 경우
-		if ((IoCnt & Session::RELEASE_FLAG) == Session::RELEASE_FLAG)
-		{
-			if (InterlockedDecrement(&pSession->IoCnt_) == 0)
-				ReleaseSession(pSession);
-			++idx;
-			continue;
-		}
-
-		SendPost(pSession);
-
-		if (InterlockedDecrement(&pSession->IoCnt_) == 0)
-			ReleaseSession(pSession);
-		++idx;
-	}
-}
 
 void NetServer::SendPostPerFrame()
 {
@@ -495,21 +499,34 @@ unsigned __stdcall NetServer::IOCPWorkerThread(LPVOID arg)
 			case OVERLAPPED_REASON::SEND:
 				pNetServer->SendProc(pSession, dwNOBT);
 				break;
+
 			case OVERLAPPED_REASON::RECV:
 				pNetServer->RecvProc(pSession, dwNOBT);
 				break;
+
 			case OVERLAPPED_REASON::TIMEOUT:
 				pNetServer->ProcessTimeOut();
 				bContinue = true;
 				break;
+
 			case OVERLAPPED_REASON::SEND_POST_FRAME:
 				pNetServer->SendPostPerFrame_IMPL((LONG*)pSession);
 				bContinue = true;
 				break;
+
+			case OVERLAPPED_REASON::SEND_ACCUM:
+				pNetServer->SendProcAccum(pSession, dwNOBT);
+				break;
+
 			case OVERLAPPED_REASON::POST:
 				pNetServer->OnPost(pSession);
-				bContinue = true;
 				break;
+
+			case OVERLAPPED_REASON::SEND_WORKER:
+				pNetServer->SendPost(pSession);
+				InterlockedExchange((LONG*)&pSession->bSendingAtWorker_, FALSE);
+				break;
+
 			default:
 				__debugbreak();
 			}
@@ -545,7 +562,7 @@ unsigned __stdcall NetServer::TimeOutThreadFunc(LPVOID arg)
 
 BOOL NetServer::RecvPost(Session* pSession)
 {
-	if (pSession->bDisconnectCalled_ == true)
+	if (pSession->bDisconnectCalled_ == TRUE)
 		return FALSE;
 
 	WSABUF wsa[2];
@@ -564,7 +581,7 @@ BOOL NetServer::RecvPost(Session* pSession)
 		DWORD dwErrCode = WSAGetLastError();
 		if (dwErrCode == WSA_IO_PENDING)
 		{
-			if (pSession->bDisconnectCalled_ == true)
+			if (pSession->bDisconnectCalled_ == TRUE)
 			{
 				CancelIoEx((HANDLE)pSession->sock_, nullptr);
 				return FALSE;
@@ -627,7 +644,70 @@ BOOL NetServer::SendPost(Session* pSession)
 		DWORD dwErrCode = WSAGetLastError();
 		if (dwErrCode == WSA_IO_PENDING)
 		{
-			if (pSession->bDisconnectCalled_ == true)
+			if (pSession->bDisconnectCalled_ == TRUE)
+			{
+				CancelIoEx((HANDLE)pSession->sock_, nullptr);
+				return FALSE;
+			}
+			return TRUE;
+		}
+
+		InterlockedDecrement(&(pSession->IoCnt_));
+		if (dwErrCode == WSAECONNRESET)
+			return FALSE;
+
+		LOG(L"Disconnect", ERR, TEXTFILE, L"Client Disconnect By ErrCode : %u", dwErrCode);
+		return FALSE;
+	}
+	return TRUE;
+}
+
+BOOL NetServer::SendPostAccum(Session* pSession)
+{
+	DWORD dwBufferNum;
+	while (1)
+	{
+		if (pSession->sendPacketQ_.GetSize() <= 0)
+			return FALSE;
+
+		// 현재 값을 TRUE로 바꾼다. 원래 TRUE엿다면 반환값이 TRUE일것이며 그렇다면 현재 SEND 진행중이기 때문에 그냥 빠저나간다
+		// 이 조건문의 위치로 인하여 Out은 바뀌지 않을것임이 보장된다.
+		// 하지만 SendPost 실행주체가 Send완료통지 스레드인 경우에는 in의 위치는 SendPacket으로 인해서 바뀔수가 있다.
+		// iUseSize를 구하는 시점에서의 DirectDequeueSize의 값이 달라질수있다.
+		if (InterlockedExchange((LONG*)&pSession->bSendingInProgress_, TRUE) == TRUE)
+			return TRUE;
+
+		// SendPacket에서 in을 옮겨서 UseSize가 0보다 커진시점에서 Send완료통지가 도착해서 Out을 옮기고 플래그 해제 Recv완료통지 스레드가 먼저 SendPost에 도달해 플래그를 선점한경우 UseSize가 0이나온다.
+		// 여기서 flag를 다시 FALSE로 바꾸어주지 않아서 멈춤발생
+		dwBufferNum = pSession->sendPacketQ_.GetSize();
+		if (dwBufferNum <= 0)
+			InterlockedExchange((LONG*)&pSession->bSendingInProgress_, FALSE);
+		else
+			break;
+	}
+
+	WSABUF wsa[50];
+	DWORD i;
+	for (i = 0; i < 50 && i < dwBufferNum; ++i)
+	{
+		Packet* pPacket = pSession->sendPacketQ_.Dequeue().value();
+		wsa[i].buf = (char*)pPacket->pBuffer_;
+		wsa[i].len = pPacket->GetUsedDataSize() + sizeof(Packet::NetHeader);
+		pSession->pSendPacketArr_[i] = pPacket;
+	}
+
+	InterlockedExchange(&pSession->lSendBufNum_, i);
+	InterlockedAdd(&sendTPS_, i);
+	InterlockedIncrement(&pSession->IoCnt_);
+	ZeroMemory(&(pSession->sendOverlapped.overlapped), sizeof(WSAOVERLAPPED));
+	pSession->sendOverlapped.why = OVERLAPPED_REASON::SEND_ACCUM;
+	int iSendRet = WSASend(pSession->sock_, wsa, i, nullptr, 0, (LPWSAOVERLAPPED)&(pSession->sendOverlapped), nullptr);
+	if (iSendRet == SOCKET_ERROR)
+	{
+		DWORD dwErrCode = WSAGetLastError();
+		if (dwErrCode == WSA_IO_PENDING)
+		{
+			if (pSession->bDisconnectCalled_ == TRUE)
 			{
 				CancelIoEx((HANDLE)pSession->sock_, nullptr);
 				return FALSE;
@@ -687,7 +767,7 @@ void NetServer::RecvProc(Session* pSession, int numberOfBytesTransferred)
 	pSession->recvRB_.MoveInPos(numberOfBytesTransferred);
 	while (1)
 	{
-		if (pSession->bDisconnectCalled_ == true)
+		if (pSession->bDisconnectCalled_ == TRUE)
 			return;
 
 		Packet::NetHeader header;
@@ -734,7 +814,7 @@ void NetServer::RecvProc(Session* pSession, int numberOfBytesTransferred)
 
 void NetServer::SendProc(Session* pSession, DWORD dwNumberOfBytesTransferred)
 {
-	if (pSession->bDisconnectCalled_ == true)
+	if (pSession->bDisconnectCalled_ == TRUE)
 		return;
 
 	LONG sendBufNum = pSession->lSendBufNum_;
@@ -750,6 +830,25 @@ void NetServer::SendProc(Session* pSession, DWORD dwNumberOfBytesTransferred)
 
 	InterlockedExchange((LONG*)&pSession->bSendingInProgress_, FALSE);
 	SendPost(pSession);
+}
+
+void NetServer::SendProcAccum(Session* pSession, DWORD dwNumberOfBytesTransferred)
+{
+	if (pSession->bDisconnectCalled_ == TRUE)
+		return;
+
+	LONG sendBufNum = pSession->lSendBufNum_;
+	pSession->lSendBufNum_ = 0;
+	for (LONG i = 0; i < sendBufNum; ++i)
+	{
+		Packet* pPacket = pSession->pSendPacketArr_[i];
+		if (pPacket->DecrementRefCnt() == 0)
+		{
+			PACKET_FREE(pPacket);
+		}
+	}
+
+	InterlockedExchange((LONG*)&pSession->bSendingInProgress_, FALSE);
 }
 
 void NetServer::SENDPACKET(ULONGLONG id, SmartPacket& sendPacket)

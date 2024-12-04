@@ -2,6 +2,10 @@
 #include <string>
 #pragma comment(lib,"pdh.lib")
 
+#define ASSERT_NOT_ERROR_SUCCESS(ret) do{\
+if(ret != ERROR_SUCCESS) __debugbreak();\
+}while(0)\
+
 HMonitor::HMonitor()
 {
 	_hProcess = GetCurrentProcess();
@@ -41,24 +45,22 @@ HMonitor::HMonitor()
 	WCHAR PPBQueryStr[MAX_PATH];
 	WCHAR PNPBQueryStr[MAX_PATH];
 
-	PdhOpenQuery(NULL, NULL, &PPBQuery);
-	if (ERROR_SUCCESS != PdhOpenQuery(NULL, NULL, &PNPBQuery))
-		__debugbreak();
-	PdhOpenQuery(NULL, NULL, &MABQuery);
-	PdhOpenQuery(NULL, NULL, &NPBQuery);
+	ASSERT_NOT_ERROR_SUCCESS(PdhOpenQuery(NULL, NULL, &PPBQuery));
+	ASSERT_NOT_ERROR_SUCCESS(PdhOpenQuery(NULL, NULL, &PNPBQuery));
+	ASSERT_NOT_ERROR_SUCCESS(PdhOpenQuery(NULL, NULL, &MABQuery));
+	ASSERT_NOT_ERROR_SUCCESS(PdhOpenQuery(NULL, NULL, &NPBQuery));
+	ASSERT_NOT_ERROR_SUCCESS(PdhOpenQuery(NULL, NULL, &RETRANSEQuery));
+	ASSERT_NOT_ERROR_SUCCESS(PdhOpenQuery(NULL, NULL, &TCPTimeOutQuery));
 
 	wsprintf(PPBQueryStr, L"\\Process(%s)\\Private Bytes", processName.c_str());
-	PdhAddCounter(PPBQuery, PPBQueryStr, NULL, &PPBCounter);
+	ASSERT_NOT_ERROR_SUCCESS(PdhAddCounter(PPBQuery, PPBQueryStr, NULL, &PPBCounter));
 
 	wsprintf(PNPBQueryStr,L"\\Process(%s)\\Pool Nonpaged Bytes" , processName.c_str());
-	if (ERROR_SUCCESS != PdhAddCounter(PNPBQuery,PNPBQueryStr, NULL, &PNPBCounter))
-		__debugbreak();
-	if (ERROR_SUCCESS != PdhAddCounter(MABQuery, L"\\Memory\\Available MBytes", NULL, &MABCounter))
-		__debugbreak();
-	if (ERROR_SUCCESS != PdhAddCounter(NPBQuery, L"\\Memory\\Pool Nonpaged Bytes", NULL, &NPBCounter))
-		__debugbreak();
-
-
+	ASSERT_NOT_ERROR_SUCCESS(PdhAddCounter(PNPBQuery, PNPBQueryStr, NULL, &PNPBCounter));
+	ASSERT_NOT_ERROR_SUCCESS(PdhAddCounter(MABQuery, L"\\Memory\\Available MBytes", NULL, &MABCounter));
+	ASSERT_NOT_ERROR_SUCCESS(PdhAddCounter(NPBQuery, L"\\Memory\\Pool Nonpaged Bytes", NULL, &NPBCounter));
+	ASSERT_NOT_ERROR_SUCCESS(PdhAddCounter(RETRANSEQuery, L"\\TCPv4\\Segments Retransmitted/sec", NULL, &RETRANSECounter));
+	ASSERT_NOT_ERROR_SUCCESS(PdhAddCounter(TCPTimeOutQuery, L"\\TCPIP Performance Diagnostics\\TCP timeouts", NULL, &TCPTimeOutCounter));
 	UpdateCpuTime(nullptr, nullptr);
 }
 
@@ -189,6 +191,22 @@ double HMonitor::GetNPB()
 	PdhCollectQueryData(NPBQuery);
 	PDH_FMT_COUNTERVALUE ret;
 	PdhGetFormattedCounterValue(NPBCounter, PDH_FMT_DOUBLE, NULL, &ret);
+	return ret.doubleValue;
+}
+
+double HMonitor::GetRetranse()
+{
+	PdhCollectQueryData(RETRANSEQuery);
+	PDH_FMT_COUNTERVALUE ret;
+	PdhGetFormattedCounterValue(RETRANSECounter, PDH_FMT_DOUBLE, NULL, &ret);
+	return ret.doubleValue;
+}
+
+double HMonitor::GetTCPTimeOuts()
+{
+	PdhCollectQueryData(TCPTimeOutQuery);
+	PDH_FMT_COUNTERVALUE ret;
+	PdhGetFormattedCounterValue(TCPTimeOutCounter, PDH_FMT_DOUBLE, NULL, &ret);
 	return ret.doubleValue;
 }
 

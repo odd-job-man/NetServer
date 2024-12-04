@@ -8,7 +8,7 @@ static constexpr uintptr_t REAL_ADDR_MASK = 0x00007FFFFFFFFFFF;
 
 namespace CAddressTranslator
 {
-	static constexpr size_t COUNTER_MAX = 500;
+	static constexpr size_t COUNTER_MAX = 131072;
 	//	131071;
 	static bool CheckMetaCntBits()
 	{

@@ -12,12 +12,13 @@ struct Session
 	ULONGLONG id_;
 	ULONGLONG lastRecvTime;
 	LONG lSendBufNum_;
-	bool bDisconnectCalled_;
+	BOOL bDisconnectCalled_;
 	MYOVERLAPPED recvOverlapped;
 	MYOVERLAPPED sendOverlapped;
 	LONG IoCnt_;
 	CLockFreeQueue<Packet*> sendPacketQ_;
 	BOOL bSendingInProgress_;
+	BOOL bSendingAtWorker_;
 	Packet* pSendPacketArr_[50];
 	RingBuffer recvRB_;
 	BOOL Init(SOCKET clientSock, ULONGLONG ullClientID, SHORT shIdx);

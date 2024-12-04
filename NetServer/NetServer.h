@@ -30,8 +30,6 @@ public:
 	void SendPostPerFrame();
 protected:
 	void SendPostPerFrame_IMPL(LONG* pCounter);
-public:
-	void SendPostPerFrame_IMPL_UPDATE();
 private:
 	void ProcessTimeOut();
 	static unsigned __stdcall AcceptThread(LPVOID arg);
@@ -49,6 +47,7 @@ public:
 	Session* pSessionArr_;
 	CLockFreeStack<short> DisconnectStack_;
 	MYOVERLAPPED SendPostFrameOverlapped;
+	MYOVERLAPPED SendWorkerOverlapped;
 	MYOVERLAPPED OnPostOverlapped;
 	HANDLE hcp_;
 	HANDLE hAcceptThread_;
@@ -60,9 +59,11 @@ public:
 	LONG updateThreadSendCounter_ = 0;
 	virtual BOOL RecvPost(Session* pSession);
 	virtual BOOL SendPost(Session* pSession);
+	virtual BOOL SendPostAccum(Session* pSession);
 	virtual void ReleaseSession(Session* pSession);
 	void RecvProc(Session* pSession, int numberOfBytesTransferred);
 	void SendProc(Session* pSession, DWORD dwNumberOfBytesTransferred);
+	void SendProcAccum(Session* pSession, DWORD dwNumberOfBytesTransferred);
 	friend class Packet;
 
 	int bAccSend = 0;

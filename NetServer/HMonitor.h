@@ -14,6 +14,8 @@ struct HMonitor
 	double GetPNPB();
 	double GetAB();
 	double GetNPB();
+	double GetRetranse();
+	double GetTCPTimeOuts();
 
 public:
 	float _fProcessorTotal;
@@ -34,9 +36,13 @@ private:
 	PDH_HCOUNTER PNPBCounter;
 	PDH_HCOUNTER MABCounter;
 	PDH_HCOUNTER NPBCounter;
+	PDH_HCOUNTER RETRANSECounter;
+	PDH_HCOUNTER TCPTimeOutCounter;
 
 	PDH_HQUERY PPBQuery;
 	PDH_HQUERY PNPBQuery;
 	PDH_HQUERY MABQuery;
 	PDH_HQUERY NPBQuery;
+	PDH_HQUERY RETRANSEQuery;
+	PDH_HQUERY TCPTimeOutQuery;
 };
