@@ -2,6 +2,7 @@
 #include "IHandler.h"
 #include "CLockFreeStack.h"
 #include "MyOVERLAPPED.h"
+#include "Timer.h"
 
 
 class Stack;

@@ -23,12 +23,12 @@ class CLockFreeObjectPool
 		}
 	};
 
+public:
 	alignas(64) uintptr_t metaTop_;
 	alignas(64) long capacity_;
 	alignas(64) long size_;
 	alignas(64) size_t metaCnt_;
 
-public:
 	CLockFreeObjectPool() 
 		:metaTop_{ 0 }, capacity_{ 0 }, size_{ 0 }
 	{

@@ -6,6 +6,7 @@
 #include "Session.h"
 //#include "LanServer.h"
 #include "NetServer.h"
+#include "CLockFreeObjectPool.h"
 
 #define QUEUE
 #include "CTlsObjectPool.h"

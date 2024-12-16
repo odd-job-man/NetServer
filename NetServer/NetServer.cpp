@@ -10,10 +10,12 @@
 #include "Logger.h"
 #include "Parser.h"
 #include <locale>
+#include "Timer.h"
 #include "NetServer.h"
 #pragma comment(lib,"LoggerMt.lib")
 #pragma comment(lib, "ws2_32.lib")
 #pragma comment(lib,"TextParser.lib")
+#pragma comment(lib,"Winmm.lib")
 
 NetServer::NetServer()
 {
@@ -163,19 +165,11 @@ NetServer::NetServer()
 	}
 	LOG(L"ONOFF", SYSTEM, TEXTFILE, L"MAKE AccpetThread OK!");
 
-	//hTimeOutThread_ = (HANDLE)_beginthreadex(NULL, 0, TimeOutThreadFunc, this, CREATE_SUSPENDED, nullptr);
-	//if(!hTimeOutThread_)
-	//{
-	//	LOG(L"ONOFF", SYSTEM, TEXTFILE, L"MAKE hTimeOutThread_ Fail ErrCode : %u", WSAGetLastError());
-	//	__debugbreak();
-	//}
-	//LOG(L"ONOFF", SYSTEM, TEXTFILE, L"MAKE TimeOutThread OK!");
-
-	//TerminateTimeoutEvent_ = CreateEvent(NULL, FALSE, FALSE, NULL);
 	SendPostFrameOverlapped.why = OVERLAPPED_REASON::SEND_POST_FRAME;
 	SendPostEndEvent_ = CreateEvent(NULL, FALSE, FALSE, NULL);
 	OnPostOverlapped.why = OVERLAPPED_REASON::POST;
 	SendWorkerOverlapped.why = OVERLAPPED_REASON::SEND_WORKER;
+	Timer::Init();
 }
 
 
@@ -205,15 +199,6 @@ void NetServer::SendPacket(ULONGLONG id, SmartPacket& sendPacket)
 	sendPacket->IncreaseRefCnt();
 	pSession->sendPacketQ_.Enqueue(sendPacket.GetPacket());
 	SendPost(pSession);
-
-	//if (pSession->bSendingInProgress_ == FALSE)
-	//{
-	//	if (InterlockedExchange((LONG*)&pSession->bSendingAtWorker_, TRUE) == FALSE)
-	//	{
-	//		InterlockedIncrement(&pSession->IoCnt_);
-	//		PostQueuedCompletionStatus(hcp_, 1, (ULONG_PTR)pSession, (LPOVERLAPPED)&SendWorkerOverlapped);
-	//	}
-	//}
 
 	if (InterlockedDecrement(&pSession->IoCnt_) == 0)
 		ReleaseSession(pSession);
@@ -245,15 +230,6 @@ void NetServer::SendPacket(ULONGLONG id, Packet* pPacket)
 	pPacket->IncreaseRefCnt();
 	pSession->sendPacketQ_.Enqueue(pPacket);
 
-	//if (pSession->bSendingInProgress_ == FALSE)
-	//{
-	//	if (InterlockedExchange((LONG*)&pSession->bSendingAtWorker_, TRUE) == FALSE)
-	//	{
-	//		InterlockedIncrement(&pSession->IoCnt_);
-	//		PostQueuedCompletionStatus(hcp_, 1, (ULONG_PTR)pSession, (LPOVERLAPPED)&SendWorkerOverlapped);
-	//	}
-	//}
-
 	SendPost(pSession);
 	if (InterlockedDecrement(&pSession->IoCnt_) == 0)
 		ReleaseSession(pSession);
@@ -282,14 +258,6 @@ void NetServer::SendPacket_ALREADY_ENCODED(ULONGLONG id, Packet* pPacket)
 
 	pPacket->IncreaseRefCnt();
 	pSession->sendPacketQ_.Enqueue(pPacket);
-	//if (pSession->bSendingInProgress_ == FALSE)
-	//{
-	//	if (InterlockedExchange((LONG*)&pSession->bSendingAtWorker_, TRUE) == FALSE)
-	//	{
-	//		InterlockedIncrement(&pSession->IoCnt_);
-	//		PostQueuedCompletionStatus(hcp_, 1, (ULONG_PTR)pSession, (LPOVERLAPPED)&SendWorkerOverlapped);
-	//	}
-	//}
 
 	SendPost(pSession);
 	if (InterlockedDecrement(&pSession->IoCnt_) == 0)
@@ -326,7 +294,6 @@ void NetServer::SendPacket_ENQUEUE_ONLY(ULONGLONG id, Packet* pPacket)
 
 void NetServer::Disconnect(ULONGLONG id)
 {
-	__debugbreak();
 	Session* pSession = pSessionArr_ + Session::GET_SESSION_INDEX(id);
 	long IoCnt = InterlockedIncrement(&pSession->IoCnt_);
 
@@ -520,6 +487,7 @@ unsigned __stdcall NetServer::IOCPWorkerThread(LPVOID arg)
 
 			case OVERLAPPED_REASON::POST:
 				pNetServer->OnPost(pSession);
+				bContinue = true;
 				break;
 
 			case OVERLAPPED_REASON::SEND_WORKER:
@@ -562,9 +530,6 @@ unsigned __stdcall NetServer::TimeOutThreadFunc(LPVOID arg)
 
 BOOL NetServer::RecvPost(Session* pSession)
 {
-	if (pSession->bDisconnectCalled_ == TRUE)
-		return FALSE;
-
 	WSABUF wsa[2];
 	wsa[0].buf = pSession->recvRB_.GetWriteStartPtr();
 	wsa[0].len = pSession->recvRB_.DirectEnqueueSize();
@@ -617,6 +582,7 @@ BOOL NetServer::SendPost(Session* pSession)
 		// SendPacket에서 in을 옮겨서 UseSize가 0보다 커진시점에서 Send완료통지가 도착해서 Out을 옮기고 플래그 해제 Recv완료통지 스레드가 먼저 SendPost에 도달해 플래그를 선점한경우 UseSize가 0이나온다.
 		// 여기서 flag를 다시 FALSE로 바꾸어주지 않아서 멈춤발생
 		dwBufferNum = pSession->sendPacketQ_.GetSize();
+
 		if (dwBufferNum <= 0)
 			InterlockedExchange((LONG*)&pSession->bSendingInProgress_, FALSE);
 		else
@@ -767,9 +733,6 @@ void NetServer::RecvProc(Session* pSession, int numberOfBytesTransferred)
 	pSession->recvRB_.MoveInPos(numberOfBytesTransferred);
 	while (1)
 	{
-		if (pSession->bDisconnectCalled_ == TRUE)
-			return;
-
 		Packet::NetHeader header;
 		if (pSession->recvRB_.Peek((char*)&header, sizeof(NetHeader)) == 0)
 			break;
@@ -814,11 +777,7 @@ void NetServer::RecvProc(Session* pSession, int numberOfBytesTransferred)
 
 void NetServer::SendProc(Session* pSession, DWORD dwNumberOfBytesTransferred)
 {
-	if (pSession->bDisconnectCalled_ == TRUE)
-		return;
-
-	LONG sendBufNum = pSession->lSendBufNum_;
-	pSession->lSendBufNum_ = 0;
+	LONG sendBufNum = InterlockedExchange(&pSession->lSendBufNum_, 0);
 	for (LONG i = 0; i < sendBufNum; ++i)
 	{
 		Packet* pPacket = pSession->pSendPacketArr_[i];
@@ -834,11 +793,7 @@ void NetServer::SendProc(Session* pSession, DWORD dwNumberOfBytesTransferred)
 
 void NetServer::SendProcAccum(Session* pSession, DWORD dwNumberOfBytesTransferred)
 {
-	if (pSession->bDisconnectCalled_ == TRUE)
-		return;
-
-	LONG sendBufNum = pSession->lSendBufNum_;
-	pSession->lSendBufNum_ = 0;
+	LONG sendBufNum = InterlockedExchange(&pSession->lSendBufNum_, 0);
 	for (LONG i = 0; i < sendBufNum; ++i)
 	{
 		Packet* pPacket = pSession->pSendPacketArr_[i];
