@@ -3,9 +3,9 @@
 
 #include "RingBuffer.h"
 
-#include "Session.h"
+#include "NetSession.h"
 
-BOOL Session::Init(SOCKET clientSock, ULONGLONG ullClientID, SHORT shIdx)
+BOOL NetSession::Init(SOCKET clientSock, ULONGLONG ullClientID, SHORT shIdx)
 {
     sock_ = clientSock;
     bSendingInProgress_ = FALSE;

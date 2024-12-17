@@ -1,6 +1,6 @@
 #pragma once 
 
-struct Session;
+struct NetSession;
 class Packet;
 class SmartPacket;
 class IHandler
@@ -13,7 +13,7 @@ public:
 	virtual void OnRelease(ULONGLONG id) = 0;
 	virtual void OnError(ULONGLONG id, int errorType, Packet* pRcvdPacket) = 0;
 private:
-	virtual BOOL SendPost(Session* pSession) = 0;
-	virtual BOOL RecvPost(Session* pSession) = 0;
-	virtual void ReleaseSession(Session* pSession) = 0;
+	virtual BOOL SendPost(NetSession* pSession) = 0;
+	virtual BOOL RecvPost(NetSession* pSession) = 0;
+	virtual void ReleaseSession(NetSession* pSession) = 0;
 };

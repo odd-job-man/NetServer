@@ -15,7 +15,6 @@ public:
 	// Test¿ë
 	void SENDPACKET(ULONGLONG id, SmartPacket& sendPacket);
 	void SEND_POST_PER_FRAME();
-
 	void SendPacket(ULONGLONG id, SmartPacket& sendPacket);
 	void SendPacket(ULONGLONG id, Packet* pPacket);
 	void SendPacket_ALREADY_ENCODED(ULONGLONG id, Packet* pPacket);
@@ -35,7 +34,6 @@ private:
 	void ProcessTimeOut();
 	static unsigned __stdcall AcceptThread(LPVOID arg);
 	static unsigned __stdcall IOCPWorkerThread(LPVOID arg);
-	static unsigned __stdcall TimeOutThreadFunc(LPVOID arg);
 public:
 	// Accept
 	DWORD IOCP_WORKER_THREAD_NUM_ = 0;
@@ -45,26 +43,25 @@ public:
 	LONG TIME_OUT_MILLISECONDS_ = 0;
 	ULONGLONG TIME_OUT_CHECK_INTERVAL_ = 0;
 	ULONGLONG ullIdCounter = 0;
-	Session* pSessionArr_;
+	NetSession* pSessionArr_;
 	CLockFreeStack<short> DisconnectStack_;
 	MYOVERLAPPED SendPostFrameOverlapped;
 	MYOVERLAPPED SendWorkerOverlapped;
 	MYOVERLAPPED OnPostOverlapped;
 	HANDLE hcp_;
 	HANDLE hAcceptThread_;
-	HANDLE hTimeOutThread_;
 	HANDLE* hIOCPWorkerThreadArr_;
-	HANDLE TerminateTimeoutEvent_;
 	HANDLE SendPostEndEvent_;
 	SOCKET hListenSock_;
 	LONG updateThreadSendCounter_ = 0;
-	virtual BOOL RecvPost(Session* pSession);
-	virtual BOOL SendPost(Session* pSession);
-	virtual BOOL SendPostAccum(Session* pSession);
-	virtual void ReleaseSession(Session* pSession);
-	void RecvProc(Session* pSession, int numberOfBytesTransferred);
-	void SendProc(Session* pSession, DWORD dwNumberOfBytesTransferred);
-	void SendProcAccum(Session* pSession, DWORD dwNumberOfBytesTransferred);
+
+	virtual BOOL RecvPost(NetSession* pSession);
+	virtual BOOL SendPost(NetSession* pSession);
+	virtual BOOL SendPostAccum(NetSession* pSession);
+	virtual void ReleaseSession(NetSession* pSession);
+	void RecvProc(NetSession* pSession, int numberOfBytesTransferred);
+	void SendProc(NetSession* pSession, DWORD dwNumberOfBytesTransferred);
+	void SendProcAccum(NetSession* pSession, DWORD dwNumberOfBytesTransferred);
 	friend class Packet;
 
 	int bAccSend = 0;

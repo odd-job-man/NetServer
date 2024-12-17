@@ -5,7 +5,7 @@
 
 class Packet;
 
-struct Session
+struct NetSession
 {
 	static constexpr LONG RELEASE_FLAG = 0x80000000;
 	SOCKET sock_;
@@ -23,8 +23,8 @@ struct Session
 	RingBuffer recvRB_;
 	BOOL Init(SOCKET clientSock, ULONGLONG ullClientID, SHORT shIdx);
 
-	Session()
-		:IoCnt_{ Session::RELEASE_FLAG | 0 }
+	NetSession()
+		:IoCnt_{ NetSession::RELEASE_FLAG | 0 }
 	{}
 
 	inline static short GET_SESSION_INDEX(ULONGLONG id)
