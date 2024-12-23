@@ -79,9 +79,6 @@
     <ClInclude Include="NetServer.h">
       <Filter>헤더 파일</Filter>
     </ClInclude>
-    <ClInclude Include="Assert.h">
-      <Filter>헤더 파일</Filter>
-    </ClInclude>
     <ClInclude Include="..\..\..\ServerCommon\ServerCommon\DataStructure\CLockFreeObjectPool.h">
       <Filter>ServerCommon\DataStructure</Filter>
     </ClInclude>

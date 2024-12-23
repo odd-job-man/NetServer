@@ -166,7 +166,6 @@
     <ClInclude Include="..\..\..\ServerCommon\ServerCommon\Parser\Parser.h" />
     <ClInclude Include="..\..\..\ServerCommon\ServerCommon\UpdateAndTimer\Timer.h" />
     <ClInclude Include="..\..\..\ServerCommon\ServerCommon\UpdateAndTimer\UpdateBase.h" />
-    <ClInclude Include="Assert.h" />
     <ClInclude Include="ErrType.h" />
     <ClInclude Include="IHandler.h" />
     <ClInclude Include="NetServer.h" />

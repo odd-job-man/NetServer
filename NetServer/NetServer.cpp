@@ -12,17 +12,20 @@
 #include <locale>
 #include "Timer.h"
 #include "NetServer.h"
+#include "DBWriteThreadBase.h"
 #pragma comment(lib,"LoggerMt.lib")
 #pragma comment(lib, "ws2_32.lib")
 #pragma comment(lib,"TextParser.lib")
 #pragma comment(lib,"Winmm.lib")
+#pragma comment(lib,"libmysql.lib")
 
-NetServer::NetServer()
+
+NetServer::NetServer(const WCHAR* pTextFileStr)
 {
 	std::locale::global(std::locale(""));
 	char* pStart;
 	char* pEnd;
-	PARSER psr = CreateParser(L"ServerConfig.txt");
+	PARSER psr = CreateParser(pTextFileStr);
 
 	WCHAR ipStr[16];
 	GetValue(psr, L"BIND_IP", (PVOID*)&pStart, (PVOID*)&pEnd);
@@ -419,9 +422,17 @@ unsigned __stdcall NetServer::AcceptThread(LPVOID arg)
 			continue;
 		}
 
+		// 빈자리가없음 즉 MaxSession
+		auto&& opt = pNetServer->DisconnectStack_.Pop();
+		if (!opt.has_value())
+		{
+			closesocket(clientSock);
+			continue;
+		}
+
 		InterlockedIncrement((LONG*)&pNetServer->lSessionNum_);
 
-		short idx = pNetServer->DisconnectStack_.Pop().value();
+		short idx = opt.value();
 		NetSession* pSession = pNetServer->pSessionArr_ + idx;
 		pSession->Init(clientSock, pNetServer->ullIdCounter, idx);
 
@@ -501,6 +512,16 @@ unsigned __stdcall NetServer::IOCPWorkerThread(LPVOID arg)
 				InterlockedExchange((LONG*)&pSession->bSendingAtWorker_, FALSE);
 				break;
 
+			case OVERLAPPED_REASON::CONNECT:
+				break;
+
+			case OVERLAPPED_REASON::DISCONNECT:
+				break;
+
+			case OVERLAPPED_REASON::DB_WRITE:
+				((DBWriteThreadBase*)pSession)->ProcessDBWrite();
+				bContinue = true;
+				break;
 			default:
 				__debugbreak();
 			}

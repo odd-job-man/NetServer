@@ -11,7 +11,7 @@ class SmartPacket;
 class NetServer : public IHandler
 {
 public:
-	NetServer();
+	NetServer(const WCHAR* pTextFileStr);
 	// Test¿ë
 	void SENDPACKET(ULONGLONG id, SmartPacket& sendPacket);
 	void SEND_POST_PER_FRAME();
