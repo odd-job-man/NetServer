@@ -25,6 +25,11 @@ public:
 	virtual void OnRecv(ULONGLONG id, Packet* pPacket) = 0;
 	virtual void OnError(ULONGLONG id, int errorType, Packet* pRcvdPacket) = 0;
 	virtual void OnPost(void* order) = 0;
+	virtual void OnLastTaskBeforeAllWorkerThreadEndBeforeShutDown() = 0; // 일반적으로 DB스레드에대한 PQCS를 쏠때 사용할것이다
+
+	void WaitUntilShutDown(); // 메인스레드는 start이후 무조건 이걸 호출해야한다
+	void ShutDown(); // WaitUntilShutDown에서 호출
+	void RequestShutDown(); // 워커스레드가 호출
 	// 디버깅용
 	void Disconnect(ULONGLONG id);
 	void SendPostPerFrame();
@@ -45,13 +50,14 @@ public:
 	ULONGLONG ullIdCounter = 0;
 	NetSession* pSessionArr_;
 	CLockFreeStack<short> DisconnectStack_;
-	MYOVERLAPPED SendPostFrameOverlapped;
-	MYOVERLAPPED SendWorkerOverlapped;
-	MYOVERLAPPED OnPostOverlapped;
+	const MYOVERLAPPED SendPostFrameOverlapped{ OVERLAPPED{},OVERLAPPED_REASON::SEND_POST_FRAME };
+	const MYOVERLAPPED SendWorkerOverlapped{ OVERLAPPED{},OVERLAPPED_REASON::SEND_WORKER };
+	const MYOVERLAPPED OnPostOverlapped{ OVERLAPPED{},OVERLAPPED_REASON::POST };
 	HANDLE hcp_;
 	HANDLE hAcceptThread_;
 	HANDLE* hIOCPWorkerThreadArr_;
-	HANDLE SendPostEndEvent_;
+	HANDLE hSendPostEndEvent_;
+	HANDLE hShutDownEvent_;
 	SOCKET hListenSock_;
 	LONG updateThreadSendCounter_ = 0;
 

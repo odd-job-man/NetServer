@@ -21,6 +21,7 @@
 
 
 NetServer::NetServer(const WCHAR* pTextFileStr)
+	:hShutDownEvent_{ CreateEvent(NULL,FALSE,FALSE,NULL) }
 {
 	std::locale::global(std::locale(""));
 	char* pStart;
@@ -169,13 +170,9 @@ NetServer::NetServer(const WCHAR* pTextFileStr)
 	}
 	LOG(L"ONOFF", SYSTEM, TEXTFILE, L"MAKE AccpetThread OK!");
 
-	SendPostFrameOverlapped.why = OVERLAPPED_REASON::SEND_POST_FRAME;
-	SendPostEndEvent_ = CreateEvent(NULL, FALSE, FALSE, NULL);
-	OnPostOverlapped.why = OVERLAPPED_REASON::POST;
-	SendWorkerOverlapped.why = OVERLAPPED_REASON::SEND_WORKER;
+	hSendPostEndEvent_ = CreateEvent(NULL, FALSE, FALSE, NULL);
 	Timer::Init();
 }
-
 
 void NetServer::SendPacket(ULONGLONG id, SmartPacket& sendPacket)
 {
@@ -296,6 +293,67 @@ void NetServer::SendPacket_ENQUEUE_ONLY(ULONGLONG id, Packet* pPacket)
 		ReleaseSession(pSession);
 }
 
+void NetServer::WaitUntilShutDown()
+{
+	WaitForSingleObject(hShutDownEvent_, INFINITE);
+	ShutDown();
+}
+
+// 워커스레드에서는 호출하면 안된다
+void NetServer::ShutDown()
+{
+	// 워커스레드에서 호출한경우 안됨, 워커에서는 RequestShutDown을 호출해야함
+	HANDLE hDebug = GetCurrentThread();
+	for (DWORD i = 0; i < IOCP_WORKER_THREAD_NUM_; ++i)
+	{
+		if (hIOCPWorkerThreadArr_[i] == hDebug)
+		{
+			LOG(L"ERROR", ERR, CONSOLE, L"WORKER Call Shutdown Must Have To Call RequestShutDown", Packet::packetPool_.capacity_, Packet::packetPool_.size_);
+			LOG(L"ERROR", ERR, TEXTFILE, L"WORKER Call Shutdown Must Have To Call RequestShutDown", Packet::packetPool_.capacity_, Packet::packetPool_.size_);
+			__debugbreak();
+		}
+	}
+	// 리슨소켓을 닫아서 Accept를 막는다
+	closesocket(hListenSock_);
+	WaitForSingleObject(hAcceptThread_, INFINITE);
+	CloseHandle(hAcceptThread_);
+
+	//세션 0될때까지 돌린다
+	while (InterlockedXor(&lSessionNum_, 0) != 0)
+	{
+		for (int i = 0; i < maxSession_; ++i)
+		{
+			CancelIoEx((HANDLE)pSessionArr_[i].sock_, nullptr);
+			InterlockedExchange((LONG*)&pSessionArr_[i].bDisconnectCalled_, TRUE);
+		}
+	}
+
+	// 더이상 PQCS는 들어오지 않으므로 UpdateBase* 를 PQCS로 쏘는것을 막기위해 Timer스레드를 제거한다
+	Timer::Release_TimerThread();
+
+	// 마지막 DB등에 대한 잔여분을 처리할 PQCS등을 여기서 쏜다
+	OnLastTaskBeforeAllWorkerThreadEndBeforeShutDown();
+
+	// 워커스레드를 종료하기위한 PQCS를 쏘고 대기한다
+	for (DWORD i = 0; i < IOCP_WORKER_THREAD_NUM_; ++i)
+		PostQueuedCompletionStatus(hcp_, 0, 0, 0);
+
+	WaitForMultipleObjects(IOCP_WORKER_THREAD_NUM_, hIOCPWorkerThreadArr_, TRUE, INFINITE);
+	Timer::Release_UpdateBase();
+
+	CloseHandle(hcp_);
+	for (DWORD i = 0; i < IOCP_WORKER_THREAD_NUM_; ++i)
+		CloseHandle(hIOCPWorkerThreadArr_[i]);
+	delete[] pSessionArr_;
+	CloseHandle(hSendPostEndEvent_);
+	CloseHandle(hShutDownEvent_);
+}
+
+void NetServer::RequestShutDown()
+{
+	SetEvent(hShutDownEvent_);
+}
+
 void NetServer::Disconnect(ULONGLONG id)
 {
 	NetSession* pSession = pSessionArr_ + NetSession::GET_SESSION_INDEX(id);
@@ -380,7 +438,7 @@ void NetServer::SendPostPerFrame_IMPL(LONG* pCounter)
 	if (InterlockedDecrement(&updateThreadSendCounter_) == 0)
 	{
 		InterlockedExchange(&Cnt, 0);
-		SetEvent(SendPostEndEvent_);
+		SetEvent(hSendPostEndEvent_);
 	}
 }
 
@@ -390,7 +448,7 @@ void NetServer::SendPostPerFrame()
 	updateThreadSendCounter_ = 1;
 	for(int i = 0; i < 2; ++i)
 		PostQueuedCompletionStatus(hcp_, 1, 1, (LPOVERLAPPED)&SendPostFrameOverlapped);
-	WaitForSingleObject(SendPostEndEvent_, INFINITE);
+	WaitForSingleObject(hSendPostEndEvent_, INFINITE);
 }
 
 unsigned __stdcall NetServer::AcceptThread(LPVOID arg)
